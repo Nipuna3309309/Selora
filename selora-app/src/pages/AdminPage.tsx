@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { formatLkr } from '../domain/format'
-import type { Clothing, ClothingInput } from '../domain/types'
+import { CATEGORIES, SIZES, type Clothing, type ClothingInput } from '../domain/types'
 import { useApp } from '../context'
 import { usePolled } from '../usePolled'
 import { OrderList } from './OrdersPage'
@@ -12,9 +12,9 @@ export function AdminPage() {
   const [tab, setTab] = useState<Tab>('clothes')
   const orders = usePolled(() => service.listAllOrders(), [service], 3000)
   const inFlight = (orders.data ?? []).filter(
-    (o) => o.processingStatus === 'Pending' || o.processingStatus === 'Processing',
+    (o) => o.status === 'Pending' || o.status === 'Processing',
   ).length
-  const review = (orders.data ?? []).filter((o) => o.processingStatus === 'NeedsReview')
+  const review = (orders.data ?? []).filter((o) => o.status === 'NeedsReview')
 
   return (
     <section>
@@ -40,18 +40,18 @@ export function AdminPage() {
       {tab === 'clothes' && <ClothesTab stockLocked={inFlight > 0} />}
       {tab === 'costs' && <CostsTab />}
       {tab === 'orders' && <OrderList orders={orders.data ?? []} showCustomer />}
-      {tab === 'sales' && <SalesTab refreshKey={(orders.data ?? []).map((o) => o.processingStatus).join()} />}
+      {tab === 'sales' && <SalesTab refreshKey={(orders.data ?? []).map((o) => o.status).join()} />}
     </section>
   )
 }
 
 const BLANK: ClothingInput = {
   name: '',
-  category: '',
-  description: '',
-  imageUrl: '',
-  size: '',
+  sku: '',
+  category: 'Other',
+  size: 'One Size',
   colour: '',
+  photoUrl: '',
   price: 0,
   stock: 0,
   lowStockThreshold: 2,
@@ -80,7 +80,11 @@ function ClothesTab({ stockLocked }: { stockLocked: boolean }) {
             <div>
               {formatLkr(c.price)} · stock {c.stock} · low at {c.lowStockThreshold} ·{' '}
               {c.isActive ? 'Active' : 'Inactive'}
-              {c.stockAlertState !== 'None' && <span className="chip chip-warn">{c.stockAlertState === 'Zero' ? 'Out of stock' : 'Low stock'}</span>}
+              {c.stock === 0 ? (
+                <span className="chip chip-bad">Out of stock</span>
+              ) : c.stock <= c.lowStockThreshold ? (
+                <span className="chip chip-warn">Low stock</span>
+              ) : null}
             </div>
           </article>
         ))}
@@ -116,10 +120,20 @@ function ClothingForm({
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(false)
   const set = <K extends keyof ClothingInput>(k: K, v: ClothingInput[K]) => setF((p) => ({ ...p, [k]: v }))
-  const text = (k: 'name' | 'category' | 'description' | 'imageUrl' | 'size' | 'colour', label: string) => (
+  const text = (k: 'name' | 'sku' | 'photoUrl' | 'colour', label: string) => (
     <label>
       {label}
       <input value={f[k]} onChange={(e) => set(k, e.target.value)} />
+    </label>
+  )
+  const choice = (k: 'category' | 'size', label: string, options: readonly string[]) => (
+    <label>
+      {label}
+      <select value={f[k]} onChange={(e) => set(k, e.target.value)}>
+        {options.map((o) => (
+          <option key={o}>{o}</option>
+        ))}
+      </select>
     </label>
   )
   async function save() {
@@ -139,11 +153,11 @@ function ClothingForm({
         <h2>{f.id ? 'Edit clothing' : 'Add clothing'}</h2>
         <div className="form">
           {text('name', 'Name')}
-          {text('category', 'Category')}
-          {text('size', 'Size')}
+          {text('sku', 'SKU (unique)')}
+          {choice('category', 'Category', CATEGORIES)}
+          {choice('size', 'Size', SIZES)}
           {text('colour', 'Colour')}
-          {text('imageUrl', 'Image URL')}
-          {text('description', 'Description')}
+          {text('photoUrl', 'Photo URL')}
           <label>
             Price (LKR)
             <input type="number" min={0} value={f.price} onChange={(e) => set('price', Number(e.target.value))} />
@@ -208,7 +222,7 @@ function CostsTab() {
       {costs.error && <p className="error" role="alert">{costs.error}</p>}
       <div className="list">
         {(clothes.data ?? []).map((c) => {
-          const cur = (costs.data ?? []).find((x) => x.costKey === `CURRENT-${c.id}`)
+          const cur = (costs.data ?? []).find((x) => x.recordKey === `CURRENT-${c.id}`)
           return (
             <article key={c.id} className="row-card row-head">
               <span>

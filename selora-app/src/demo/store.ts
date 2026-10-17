@@ -40,35 +40,34 @@ export function seedDb(): DemoDb {
     stock: number,
     threshold: number,
     bg: string,
-    active = true,
+    isActive = true,
   ): Clothing => ({
     id,
     name,
+    sku: 'SEL-' + id.padStart(3, '0'),
     category,
-    description: `${name} in ${colour}, size ${size}.`,
-    imageUrl: img(name, bg),
     size,
     colour,
+    photoUrl: img(name, bg),
     price,
     stock,
     lowStockThreshold: threshold,
-    isActive: active,
-    stockAlertState: stock === 0 ? 'Zero' : stock <= threshold ? 'Low' : 'None',
+    isActive,
   })
   const clothes = [
-    mk('1', 'Linen Shirt', 'Tops', 'M', 'White', 6500, 12, 3, '#6b7a8f'),
-    mk('2', 'Cotton T-Shirt', 'Tops', 'L', 'Navy', 3200, 25, 5, '#2f4b7c'),
-    mk('3', 'Slim Chinos', 'Bottoms', '32', 'Beige', 8900, 4, 3, '#a68a64'),
-    mk('4', 'Summer Dress', 'Dresses', 'S', 'Coral', 11500, 1, 2, '#d1604d'),
-    mk('5', 'Denim Jacket', 'Outerwear', 'M', 'Blue', 15900, 0, 2, '#3d6a8f'),
-    mk('6', 'Wool Scarf', 'Accessories', 'One size', 'Grey', 2800, 8, 2, '#5c6b5c', false),
+    mk('1', 'Linen Shirt', 'Shirt', 'M', 'White', 6500, 12, 3, '#6b7a8f'),
+    mk('2', 'Cotton T-Shirt', 'T-Shirt', 'L', 'Navy', 3200, 25, 5, '#2f4b7c'),
+    mk('3', 'Slim Chinos', 'Trousers', 'L', 'Beige', 8900, 4, 3, '#a68a64'),
+    mk('4', 'Summer Dress', 'Dress', 'S', 'Coral', 11500, 1, 2, '#d1604d'),
+    mk('5', 'Denim Shorts', 'Shorts', 'M', 'Blue', 5900, 0, 2, '#3d6a8f'),
+    mk('6', 'Canvas Cap', 'Other', 'One Size', 'Grey', 2800, 8, 2, '#5c6b5c', false),
   ]
   const costRows: [string, number][] = [
     ['1', 3800],
     ['2', 1700],
     ['3', 5200],
     ['4', 6800],
-    ['5', 9000],
+    ['5', 3000],
     ['6', 1400],
   ]
   return {
@@ -76,9 +75,9 @@ export function seedDb(): DemoDb {
     clothes,
     costs: costRows.map(([cid, cost], i) => ({
       id: String(i + 1),
-      costKey: `CURRENT-${cid}`,
+      recordKey: 'CURRENT-' + cid,
       clothingId: cid,
-      costType: 'Current' as const,
+      costType: 'CurrentCost' as const,
       unitCost: cost,
       orderId: '',
       quantity: 0,
@@ -90,7 +89,7 @@ export function seedDb(): DemoDb {
   }
 }
 
-const KEY = 'selora-demo-db-v1'
+const KEY = 'selora-demo-db-v2'
 
 export function loadDb(): DemoDb {
   try {

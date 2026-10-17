@@ -7,14 +7,13 @@ import type {
   NewOrderInput,
   Order,
   SalesSummary,
-  StockAlertState,
 } from '../domain/types'
 import {
   AccessDeniedError,
   computeSummary,
   type ShopService,
 } from '../services/ShopService'
-import { stateAfterAdminEdit, validateClothingNumbers } from '../domain/alerts'
+import { validateClothingNumbers } from '../domain/alerts'
 import type { FlowSimulator } from './flowSimulator'
 import type { DemoDb } from './store'
 
@@ -67,9 +66,8 @@ export class DemoShopService implements ShopService {
       total: 0,
       stockBefore: null,
       stockAfter: null,
-      status: 'Submitted',
-      processingStatus: 'Pending',
-      processingStage: 'Received',
+      status: 'Pending',
+      processingStage: 'New',
       resultMessage: 'Waiting to be processed.',
       createdByEmail: this.user.email,
       createdAt: new Date().toISOString(),
@@ -108,13 +106,13 @@ export class DemoShopService implements ShopService {
     this.requireAdmin()
     if (!input.name.trim()) throw new Error('Name is required.')
     validateClothingNumbers(input.price, input.stock, input.lowStockThreshold)
-    let item = input.id ? this.db.clothes.find((c) => c.id === input.id) : undefined
-    const prev: StockAlertState = item?.stockAlertState ?? 'None'
-    const base = { ...input, id: item?.id ?? String(++this.db.seq) }
-    const next: Clothing = {
-      ...base,
-      stockAlertState: stateAfterAdminEdit(prev, input.stock, input.lowStockThreshold),
+    if (!input.sku.trim()) throw new Error('SKU is required.')
+    if (!input.colour.trim()) throw new Error('Colour is required.')
+    if (this.db.clothes.some((c) => c.sku === input.sku && c.id !== input.id)) {
+      throw new Error('SKU must be unique.')
     }
+    let item = input.id ? this.db.clothes.find((c) => c.id === input.id) : undefined
+    const next: Clothing = { ...input, id: item?.id ?? String(++this.db.seq) }
     if (item) Object.assign(item, next)
     else {
       this.db.clothes.push(next)
@@ -133,15 +131,15 @@ export class DemoShopService implements ShopService {
     this.requireAdmin()
     if (!(unitCost >= 0)) throw new Error('Cost must be zero or more.')
     const key = `CURRENT-${clothingId}`
-    const row = this.db.costs.find((c) => c.costKey === key)
+    const row = this.db.costs.find((c) => c.recordKey === key)
     // Only the CURRENT row changes; SALE-<order> snapshots are never edited.
     if (row) row.unitCost = unitCost
     else
       this.db.costs.push({
         id: String(++this.db.seq),
-        costKey: key,
+        recordKey: key,
         clothingId,
-        costType: 'Current',
+        costType: 'CurrentCost',
         unitCost,
         orderId: '',
         quantity: 0,

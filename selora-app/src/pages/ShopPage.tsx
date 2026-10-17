@@ -77,7 +77,7 @@ function ClothingCard({ item, onBuy }: { item: Clothing; onBuy: (qty: number) =>
   const max = Math.max(1, Math.min(MAX_QTY, item.stock))
   return (
     <article className={`card${blocked ? ' card-off' : ''}`}>
-      <img src={item.imageUrl} alt={item.name} loading="lazy" />
+      <img src={item.photoUrl} alt={item.name} loading="lazy" />
       <div className="card-body">
         <h3>{item.name}</h3>
         <p className="price">{formatLkr(item.price)}</p>
@@ -157,7 +157,7 @@ function CheckoutDialog({
             Payment succeeds
           </label>
           <label className="radio">
-            <input type="radio" name="pay" checked={payment === 'Failure'} onChange={() => setPayment('Failure')} />
+            <input type="radio" name="pay" checked={payment === 'Failed'} onChange={() => setPayment('Failed')} />
             Payment fails
           </label>
         </fieldset>

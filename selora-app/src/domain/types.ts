@@ -6,62 +6,56 @@ export interface AppUser {
   role: Role
 }
 
-export type StockAlertState = 'None' | 'Low' | 'Zero'
+export const CATEGORIES = ['T-Shirt', 'Shirt', 'Trousers', 'Dress', 'Shorts', 'Other'] as const
+export const SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'One Size'] as const
 
 export interface Clothing {
   id: string
   name: string
+  sku: string
   category: string
-  description: string
-  imageUrl: string
   size: string
   colour: string
+  photoUrl: string
   price: number
   stock: number
   lowStockThreshold: number
   isActive: boolean
-  /** Written by the flow so low/zero alerts fire once per crossing. */
-  stockAlertState: StockAlertState
 }
 
-export type CostType = 'Current' | 'SaleSnapshot'
+/** RecordKey is CURRENT-<clothingId> or SALE-<orderId>. */
+export type CostType = 'CurrentCost' | 'SaleCost'
 
 export interface ClothingCost {
   id: string
-  /** Unique key: CURRENT-<clothingId> or SALE-<orderId>. */
-  costKey: string
+  recordKey: string
   clothingId: string
   costType: CostType
   unitCost: number
+  /** Order ID for SaleCost rows. */
   orderId: string
   quantity: number
 }
 
-export type SimulatedPayment = 'Success' | 'Failure'
-export type OrderStatus = 'Submitted' | 'Confirmed' | 'Rejected'
-export type ProcessingStatus = 'Pending' | 'Processing' | 'Completed' | 'Failed' | 'NeedsReview'
-export type ProcessingStage =
-  | 'Received'
-  | 'Prepared'
-  | 'StockUpdated'
-  | 'SnapshotCreated'
-  | 'Confirmed'
+export type SimulatedPayment = 'Success' | 'Failed'
+export type OrderStatus = 'Pending' | 'Processing' | 'Confirmed' | 'Rejected' | 'NeedsReview'
+export type ProcessingStage = 'New' | 'Prepared' | 'StockUpdated' | 'Completed'
 
 export interface Order {
   id: string
-  /** Stable client-generated key (the Title column); unique so retries cannot duplicate. */
+  /** Stable client-generated key; unique so retries cannot duplicate. */
   requestId: string
   clothingId: string
+  /** Lookup display value (Clothes Title). */
+  clothingName: string
   quantity: number
   simulatedPayment: SimulatedPayment
   // Everything below is written only by the flow.
-  clothingName: string
   unitPrice: number
   total: number
   stockBefore: number | null
   stockAfter: number | null
   status: OrderStatus
-  processingStatus: ProcessingStatus
   processingStage: ProcessingStage
   resultMessage: string
   /** SharePoint Created By. */
@@ -69,7 +63,15 @@ export interface Order {
   createdAt: string
 }
 
-export type NotificationType = 'OrderConfirmed' | 'OrderRejected' | 'LowStock' | 'OutOfStock' | 'NeedsReview'
+export type NotificationType =
+  | 'OrderConfirmed'
+  | 'OrderRejected'
+  | 'LowStock'
+  | 'OutOfStock'
+  /** Not in the lists as created: add this choice to Notifications.NotificationType. */
+  | 'NeedsReview'
+
+export type EmailStatus = 'Pending' | 'Sent' | 'Failed'
 
 export interface AppNotification {
   id: string
@@ -80,6 +82,7 @@ export interface AppNotification {
   message: string
   orderId: string
   isRead: boolean
+  emailStatus?: EmailStatus
   createdAt: string
 }
 
@@ -93,11 +96,11 @@ export interface NewOrderInput {
 export interface ClothingInput {
   id?: string
   name: string
+  sku: string
   category: string
-  description: string
-  imageUrl: string
   size: string
   colour: string
+  photoUrl: string
   price: number
   stock: number
   lowStockThreshold: number

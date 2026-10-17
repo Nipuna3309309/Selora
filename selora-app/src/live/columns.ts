@@ -1,8 +1,8 @@
 /**
- * ASSUMED SharePoint schema. The brief referred to "exact columns supplied with
- * this prompt" but none were attached, so these names are proposals. If your
- * columns differ, change them here and in provisioning/provision-sharepoint.ps1.
- * Internal column names must not contain spaces.
+ * SharePoint list and column names, as created on the NipunaAutomateTesting site.
+ * ID, Title, Created and Created By are built in. Keep this file as the only place
+ * these names appear in the app. Pending: confirm the internal names with the
+ * generated Code Apps models once the data sources are added.
  */
 export const LISTS = {
   users: 'Users',
@@ -15,49 +15,47 @@ export const LISTS = {
 export type ListName = (typeof LISTS)[keyof typeof LISTS]
 
 export const COLS = {
-  users: { email: 'Title', displayName: 'DisplayName', role: 'Role' },
+  users: { userAccount: 'UserAccount', role: 'Role' },
   clothes: {
     name: 'Title',
+    sku: 'SKU',
     category: 'Category',
-    description: 'Description',
-    imageUrl: 'ImageUrl',
     size: 'Size',
     colour: 'Colour',
-    price: 'Price',
-    stock: 'Stock',
-    lowStockThreshold: 'LowStockThreshold',
+    photoUrl: 'PhotoUrl',
+    price: 'SellingPrice',
+    stock: 'StockQuantity',
+    lowStockThreshold: 'LowStockLevel',
     isActive: 'IsActive',
-    stockAlertState: 'StockAlertState',
   },
   costs: {
-    costKey: 'Title',
-    clothingId: 'ClothingId',
-    costType: 'CostType',
+    recordKey: 'RecordKey',
+    recordType: 'RecordType',
+    clothing: 'Clothing',
+    orderItemId: 'OrderItemId',
     unitCost: 'UnitCost',
-    orderId: 'OrderId',
     quantity: 'Quantity',
   },
   orders: {
-    requestId: 'Title',
-    clothingId: 'ClothingId',
+    requestId: 'RequestId',
+    clothing: 'Clothing',
     quantity: 'Quantity',
     simulatedPayment: 'SimulatedPayment',
-    clothingName: 'ClothingName',
+    status: 'Status',
     unitPrice: 'UnitPrice',
-    total: 'Total',
+    total: 'TotalAmount',
     stockBefore: 'StockBefore',
     stockAfter: 'StockAfter',
-    status: 'OrderStatus',
-    processingStatus: 'ProcessingStatus',
     processingStage: 'ProcessingStage',
     resultMessage: 'ResultMessage',
   },
   notifications: {
-    notificationKey: 'Title',
-    recipientEmail: 'RecipientEmail',
-    type: 'NotificationType',
+    notificationKey: 'NotificationKey',
+    recipient: 'Recipient',
     message: 'Message',
-    orderId: 'OrderId',
+    type: 'NotificationType',
+    orderItemId: 'OrderItemId',
     isRead: 'IsRead',
+    emailStatus: 'EmailStatus',
   },
 } as const

@@ -1,18 +1,17 @@
-import type { StockAlertState } from './types'
+export type StockCrossing = 'none' | 'low' | 'zero'
 
 /**
- * State written when an admin edits stock. Restocking above the threshold
- * re-arms alerts. At or below it, the state records "already alerted" so
- * repeat sales stay quiet until stock recovers.
+ * Stateless alert rule, so no extra column is needed. An alert fires only when
+ * a sale moves stock across a boundary, which makes repeats impossible until
+ * stock rises back above the threshold and falls again.
+ *  - zero: stock was above 0 and is now 0
+ *  - low:  stock was above the threshold and is now at or below it (but not 0)
+ * A sale from above the threshold straight to 0 sends only the zero alert.
  */
-export function stateAfterAdminEdit(
-  prev: StockAlertState,
-  stock: number,
-  threshold: number,
-): StockAlertState {
-  if (stock > threshold) return 'None'
-  if (stock === 0) return 'Zero'
-  return prev === 'None' ? 'Low' : prev
+export function stockCrossing(before: number, after: number, threshold: number): StockCrossing {
+  if (after <= 0 && before > 0) return 'zero'
+  if (after > 0 && before > threshold && after <= threshold) return 'low'
+  return 'none'
 }
 
 export function validateClothingNumbers(price: number, stock: number, threshold: number): void {

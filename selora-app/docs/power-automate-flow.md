@@ -1,116 +1,99 @@
 # The Power Automate flow (build it by hand)
 
-One flow: **Selora – Process Order**. It is the only thing that changes stock, prices, totals,
-statuses and cost snapshots. The local demo (`src/demo/flowSimulator.ts`) implements exactly these
-steps, and `src/demo/flow.test.ts` tests them. **The real flow has not been built or run yet.**
+One flow: **Selora – Process Order**. It is the only thing that changes stock, prices, totals, statuses and
+cost records. The local demo (`src/demo/flowSimulator.ts`) implements exactly these steps and
+`src/demo/flow.test.ts` tests them. **The real flow has not been built or run yet.**
 
-Connections: *SharePoint* and *Office 365 Outlook*, both owned by an account in `Selora Admins`.
+Connections: *SharePoint* and *Office 365 Outlook*, owned by an account in `Selora Admins`.
+Below, `T` means the trigger's dynamic content and "Cloth" the clothing row re-read in step 5.
 
 ## 1. Trigger
 **SharePoint – When an item is created** (site above, list `Orders`).
-
-Settings (…) > **Concurrency control: On, Degree of parallelism = 1.** This serializes runs so two
-buyers cannot both pass the stock check. (It cannot be turned off again once enabled.)
-
-Name the trigger step `Trigger`; below, `T` means its dynamic content.
+Trigger settings (…) > **Concurrency control = On, Degree of parallelism = 1.** This serialises runs so two buyers cannot both pass
+the stock check. (It cannot be turned off again once enabled.)
 
 ## 2. Idempotency guard
-*Condition* `T ProcessingStatus Value` **is equal to** `Pending`. If **No**, *Terminate* (Succeeded).
-This stops a replayed trigger from processing an order twice.
+Condition: `T Status Value` equals `Pending` **and** `T ProcessingStage Value` equals `New`. If not, *Terminate* (Succeeded).
 
-## 3. Variables / lookups
-- *Get items* `Users`, filter `Role eq 'Admin'` -> `GetAdmins`.
-- *Select* from `GetAdmins` value, map `item()?['Title']` -> `AdminEmails`.
-  Admin list as text: `join(body('AdminEmails'), ';')`.
-- *Compose* `CustomerEmail` = `toLower(triggerOutputs()?['body/Author/Email'])`.
-  **Never** use a customer-supplied value for identity.
+## 3. Identity and admins
+- *Compose* `CustomerEmail` = `toLower(triggerOutputs()?['body/Author/Email'])`. Always use Created By; never a request field.
+- *Get items* `Users`, filter `Role eq 'Admin'` -> `GetAdmins`. Admin emails are `UserAccount/Email` of each row.
 
 ## 4. Blocked-processing guard
 *Get items* `Orders`, filter
-`(ProcessingStatus eq 'Processing' or ProcessingStatus eq 'NeedsReview') and ID ne @{triggerOutputs()?['body/ID']}`,
-Top Count 1 -> `OpenReviews`.
-*Condition* `length(body('OpenReviews')?['value'])` is greater than `0` -> run **Reject** with message
+`(Status eq 'Processing' or Status eq 'NeedsReview') and ID ne @{triggerOutputs()?['body/ID']}`, Top 1 -> `OpenReviews`.
+If `length(body('OpenReviews')?['value'])` > 0, run **Reject** with
 `Order processing is paused while an earlier order is being reviewed. Please try again later.`
 
 ## 5. Re-read everything (ignore the request)
-- *Get items* `Clothes`, filter `ID eq @{triggerOutputs()?['body/ClothingId']}`, Top 1 -> `GetCloth`.
-- *Get items* `ClothingCosts`, filter `Title eq 'CURRENT-@{triggerOutputs()?['body/ClothingId']}'`, Top 1 -> `GetCost`.
-- *Compose* `Cloth` = `first(body('GetCloth')?['value'])`, `Cost` = `first(body('GetCost')?['value'])`.
+- Clothing ID: `triggerOutputs()?['body/Clothing/Id']`.
+- *Get items* `Clothes`, filter `ID eq <Clothing ID>`, Top 1 -> `GetCloth`; *Compose* `Cloth` = `first(body('GetCloth')?['value'])`.
+- *Get items* `ClothingCosts`, filter `RecordKey eq 'CURRENT-<Clothing ID>'`, Top 1 -> `GetCost`; *Compose* `Cost` = `first(...)`.
 
 ## 6. Validation (any failure -> Reject, no stock change)
-Use a chain of Conditions, or one Condition per row, each leading to **Reject** with its message:
-
-| Check | Expression (true = OK) | Message |
+| Check | True means OK | Message |
 |---|---|---|
 | Quantity | `and(greaterOrEquals(triggerOutputs()?['body/Quantity'],1), lessOrEquals(triggerOutputs()?['body/Quantity'],10))` | Quantity must be a whole number from 1 to 10. |
 | Payment | `equals(triggerOutputs()?['body/SimulatedPayment/Value'],'Success')` | Simulated payment failed. No stock was deducted. |
 | Item exists and active | `and(not(empty(body('GetCloth')?['value'])), equals(outputs('Cloth')?['IsActive'],true))` | This item is not available. |
 | Current cost exists | `not(empty(body('GetCost')?['value']))` | This item is temporarily unavailable. |
-| Stock | `greaterOrEquals(outputs('Cloth')?['Stock'], triggerOutputs()?['body/Quantity'])` | `concat('Insufficient stock. Only ', string(outputs('Cloth')?['Stock']), ' available.')` |
+| Stock | `greaterOrEquals(outputs('Cloth')?['StockQuantity'], triggerOutputs()?['body/Quantity'])` | `concat('Insufficient stock. Only ', string(outputs('Cloth')?['StockQuantity']), ' available.')` |
 
-Evaluate the Cloth/Cost checks only after confirming the lookup returned a row (nest them) so
-`first()` of an empty array does not error.
+Nest the Cloth/Cost checks inside the "row exists" checks so `first()` of an empty array never errors.
 
-### Reject (reusable pattern, run it in a Scope named `Reject`)
-1. *Update item* `Orders` ID `T ID`: `OrderStatus`=Rejected, `ProcessingStatus`=Failed, `ResultMessage`=message.
-2. *Create item* `Notifications`: Title `ORDER-@{T ID}-REJECTED`, RecipientEmail `CustomerEmail`, type OrderRejected, Message.
-3. Step 14 below (grant the customer access to that item).
-4. *Terminate* (Succeeded): the rejection is a normal result.
+### Reject (Scope `Reject`)
+1. *Update item* Orders (ID `T ID`): `Status` = Rejected, `ResultMessage` = the message. (Stage stays New.)
+2. *Create item* Notifications: Title and `NotificationKey` = `ORDER-@{T ID}-REJECTED`, `Recipient` = customer, `NotificationType` = OrderRejected,
+   `OrderItemId` = `T ID`, `Message`. Then step 12.
+3. *Terminate* (Succeeded): a rejection is a normal result.
 
 ## 7. Prepared (authoritative values, one write)
-*Compose* `StockBefore` = `outputs('Cloth')?['Stock']`; `StockAfter` = `sub(outputs('Cloth')?['Stock'], T Quantity)`.
-*Update item* `Orders` ID `T ID`:
-`ClothingName`=`Cloth Title`, `UnitPrice`=`Cloth Price`, `Total`=`mul(outputs('Cloth')?['Price'], T Quantity)`,
-`StockBefore`, `StockAfter`, `ProcessingStatus`=Processing, `ProcessingStage`=Prepared.
+`StockBefore` = `outputs('Cloth')?['StockQuantity']`; `StockAfter` = `sub(StockBefore, T Quantity)`.
+*Update item* Orders: `UnitPrice` = Cloth `SellingPrice`, `TotalAmount` = `mul(outputs('Cloth')?['SellingPrice'], T Quantity)`,
+`StockBefore`, `StockAfter`, `Status` = Processing, `ProcessingStage` = Prepared.
 
-## 8. Everything that can fail goes in Scope `Process`
-Inside the scope, in order:
-1. **Stock**: *Update item* `Clothes` ID `Cloth ID`, `Stock` = **`StockAfter`** (the recorded value, never `Stock - Quantity`
-   recomputed). Then *Update item* Orders: `ProcessingStage`=StockUpdated.
-2. **Cost snapshot**: *Create item* `ClothingCosts`: Title `SALE-@{T ID}`, ClothingId, CostType=SaleSnapshot,
-   UnitCost = `Cost UnitCost`, OrderId = `T ID`, Quantity = `T Quantity`.
-   The unique Title blocks duplicates. Then *Update item* Orders: `ProcessingStage`=SnapshotCreated.
-3. **Confirm**: *Update item* Orders: `OrderStatus`=Confirmed, `ProcessingStatus`=Completed,
-   `ProcessingStage`=Confirmed, `ResultMessage`=`Order confirmed. Thank you!`
+## 8. Scope `Process` (everything that can fail)
+1. **Stock**: *Update item* Clothes (`Cloth ID`): `StockQuantity` = **`StockAfter`** (the recorded value, never recomputed `Stock - Quantity`).
+   Then *Update item* Orders: `ProcessingStage` = StockUpdated.
+2. **Cost record**: *Create item* ClothingCosts: Title and `RecordKey` = `SALE-@{T ID}`, `RecordType` = SaleCost, `Clothing` = Cloth ID,
+   `OrderItemId` = `T ID`, `UnitCost` = Cost `UnitCost`, `Quantity` = `T Quantity`. The unique `RecordKey` blocks duplicates.
+3. **Confirm**: *Update item* Orders: `Status` = Confirmed, `ProcessingStage` = Completed, `ResultMessage` = `Order confirmed. Thank you!`
+
+The stage list has no step between StockUpdated and Completed, so an interruption after the cost record but before Confirm
+shows as `StockUpdated`. Recovery checks whether `SALE-<OrderID>` exists (`recovery.md`).
+Set the retry policy of the Clothes update and the cost create to **None**.
 
 ## 9. Failure handling: Scope `NeedsReview`
-Add a Scope after `Process` with **Configure run after = has failed, has timed out** only:
-- *Update item* Orders: `ProcessingStatus`=NeedsReview, `ResultMessage`=
-  `Processing was interrupted and needs admin review. Payment is simulated; nothing was charged.`
-- For each admin (*Apply to each* over `GetAdmins`): create a `NeedsReview` notification
-  (Title `REVIEW-@{T ID}-@{admin email}`) and send an email.
+Run after `Process` **has failed / has timed out** only:
+- *Update item* Orders: `Status` = NeedsReview, `ResultMessage` = `Processing was interrupted and needs admin review. Payment is simulated; nothing was charged.`
+- For each admin: create a `NeedsReview` notification (key `REVIEW-@{T ID}-@{admin email}`) and send an email.
 - *Terminate* (Failed) so the run is visible in run history.
+Do not retry or repair inside the flow: cross-list updates are not atomic. See `recovery.md`.
 
-Do **not** retry or "fix up" inside the flow. Stock moves are not atomic across lists; see `recovery.md`.
-Turn the retry policy of the Clothes update and the cost create to **None** so a blind retry cannot
-double-apply. (The Clothes update is absolute, but keep the rule simple.)
+## 10. Scope `Notify` (run after `Process` **is successful** only; cannot change the order)
+1. *Create item* Notifications: key `ORDER-@{T ID}-CONFIRMED`, `Recipient` = customer, OrderConfirmed, `OrderItemId` = `T ID`,
+   `Message` `concat('Order ', T ID, ' confirmed: ', T Quantity, ' x ', Cloth Title)`, `EmailStatus` = Pending. Then step 12.
+2. *Send an email (V2)* to `CustomerEmail`, subject `Selora order @{T ID} confirmed`. Retry policy Fixed, 2 retries.
+3. *Update item* that notification: `EmailStatus` = Sent. A parallel branch with run-after **has failed** sets `EmailStatus` = Failed.
+   An email failure therefore never touches the order, which is already Confirmed.
 
-## 10. After confirmation (Scope `Notify`, run after `Process` **is successful** only)
-Every action here has its own failure handling; nothing in this scope can change the order.
-1. *Create item* Notifications: Title `ORDER-@{T ID}-CONFIRMED`, RecipientEmail `CustomerEmail`, type OrderConfirmed,
-   Message `concat('Order ', T ID, ' confirmed: ', T Quantity, ' x ', Cloth Title)`. Then step 14.
-2. *Send an email (V2)* to `CustomerEmail`, subject `Selora order @{T ID} confirmed`, short HTML body.
-   Settings: retry policy Fixed, 2 retries. Email failure only fails this action; the order stays Completed.
+## 11. Stock alerts (stateless, inside `Notify`)
+No alert-state column is needed. An alert fires only when this sale **crosses** a boundary:
+- Zero: `StockBefore > 0` and `StockAfter = 0` -> `OutOfStock`.
+- Low: `StockBefore > LowStockLevel` and `StockAfter > 0` and `StockAfter <= LowStockLevel` -> `LowStock`.
+A sale from above the threshold straight to 0 sends only the zero alert. Later sales while stock stays low cross nothing, so no repeats; stock must
+rise back above the threshold (admin restock) before it can alert again.
+Expression: `if(and(greater(StockBefore,0),lessOrEquals(StockAfter,0)),'Zero',if(and(greater(StockBefore,LowStockLevel),greater(StockAfter,0),lessOrEquals(StockAfter,LowStockLevel)),'Low','None'))`.
+For each admin create the notification (key `STOCK-@{Cloth ID}-@{crossing}-@{T ID}-@{admin email}`) and email, setting `EmailStatus` as in step 10.
 
-## 11. Stock alerts (inside Scope `Notify`)
-*Compose* `NewState` =
-`if(lessOrEquals(StockAfter,0),'Zero',if(lessOrEquals(StockAfter, Cloth LowStockThreshold),'Low','None'))`
-*Compose* rank of old and new (`None`=0, `Low`=1, `Zero`=2), e.g.
-`if(equals(x,'Zero'),2,if(equals(x,'Low'),1,0))`.
-*Condition* `NewRank > OldRank` where Old = `Cloth StockAlertState Value`:
-- Yes: for each admin create notification (Title `STOCK-@{Cloth ID}-@{NewState}-@{T ID}-@{admin}`, type LowStock or
-  OutOfStock) + email, **then** *Update item* Clothes `StockAlertState` = `NewState`.
-- No: do nothing. Repeated sales while stock stays low are silent.
-The Admin screen resets `StockAlertState` to None when an admin restocks above the threshold.
-
-## 12. Step 14: per-recipient access to a notification
-After creating a notification item (customers only; admins already have access):
-1. *Send an HTTP request to SharePoint* `POST _api/web/ensureuser` body `{"logonName":"i:0#.f|membership|@{CustomerEmail}"}` -> note `Id`.
+## 12. Per-recipient access to a notification (customer notifications only)
+1. *Send an HTTP request to SharePoint* `POST _api/web/ensureuser` body `{"logonName":"i:0#.f|membership|@{CustomerEmail}"}` -> note `Id`
+   (or set `Recipient` from the claims value directly when creating the item).
 2. `POST _api/web/lists/getbytitle('Notifications')/items(@{ID})/breakroleinheritance(copyRoleAssignments=false, clearSubscopes=true)`
 3. `POST _api/web/lists/getbytitle('Notifications')/items(@{ID})/roleassignments/addroleassignment(principalid=@{userId}, roledefid=@{markReadRoleId})`
-   (look up the `Selora Mark Read` role definition id once at `_api/web/roledefinitions`).
-4. Re-add `Selora Admins` the same way (`breakroleinheritance(false, ...)` removes it).
+   (look up the `Selora Mark Read` definition at `_api/web/roledefinitions`).
+4. Re-add `Selora Admins` the same way, because breaking inheritance removes them.
 
 ## Email configuration
-Office 365 Outlook connection, "Send an email (V2)". Sender is the connection owner (or use *Send from
-shared mailbox* if you have one). Emails are plain notifications; there are no secrets in them.
+Office 365 Outlook connection, "Send an email (V2)", sent as the connection owner (or a shared mailbox if available). Emails contain only
+order numbers and item names.

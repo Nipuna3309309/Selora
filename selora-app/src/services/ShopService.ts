@@ -47,18 +47,14 @@ export interface ShopService {
   getSalesSummary(): Promise<SalesSummary>
 }
 
-export function isTerminal(o: Pick<Order, 'processingStatus'>): boolean {
-  return (
-    o.processingStatus === 'Completed' ||
-    o.processingStatus === 'Failed' ||
-    o.processingStatus === 'NeedsReview'
-  )
+export function isTerminal(o: Pick<Order, 'status'>): boolean {
+  return o.status !== 'Pending' && o.status !== 'Processing'
 }
 
 export function computeSummary(orders: Order[], costs: ClothingCost[]): SalesSummary {
   const confirmed = orders.filter((o) => o.status === 'Confirmed')
   const snapshots = new Map(
-    costs.filter((c) => c.costType === 'SaleSnapshot').map((c) => [c.orderId, c]),
+    costs.filter((c) => c.costType === 'SaleCost').map((c) => [c.orderId, c]),
   )
   let revenue = 0
   let units = 0

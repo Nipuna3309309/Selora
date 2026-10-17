@@ -24,7 +24,7 @@ export function OrderList({ orders, showCustomer }: { orders: Order[]; showCusto
               {showCustomer && ` · ${o.createdByEmail}`}
             </div>
             <div>{o.total > 0 ? `Total ${formatLkr(o.total)}` : 'Total pending'}</div>
-            <div className={o.processingStatus === 'Failed' || o.processingStatus === 'NeedsReview' ? 'error' : 'muted'}>
+            <div className={o.status === 'Rejected' || o.status === 'NeedsReview' ? 'error' : 'muted'}>
               {o.resultMessage}
             </div>
           </article>

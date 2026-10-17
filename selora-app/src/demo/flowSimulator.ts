@@ -1,4 +1,5 @@
-import type { AppNotification, Clothing, Order, ProcessingStage, StockAlertState } from '../domain/types'
+import { stockCrossing } from '../domain/alerts'
+import type { AppNotification, Clothing, Order, ProcessingStage } from '../domain/types'
 import type { DemoDb } from './store'
 
 /**
@@ -18,7 +19,6 @@ export interface FlowOptions {
 }
 
 export const MAX_QTY = 10
-const ALERT_RANK: Record<StockAlertState, number> = { None: 0, Low: 1, Zero: 2 }
 
 export class FlowSimulator {
   private queue: Promise<void> = Promise.resolve()
@@ -52,7 +52,6 @@ export class FlowSimulator {
 
   private reject(order: Order, message: string): void {
     order.status = 'Rejected'
-    order.processingStatus = 'Failed'
     order.resultMessage = message
     this.notify(
       order.createdByEmail,
@@ -74,7 +73,7 @@ export class FlowSimulator {
   ): void {
     // Unique key => replays cannot create duplicate notifications.
     if (this.db.notifications.some((n) => n.notificationKey === key)) return
-    this.db.notifications.push({
+    const note: AppNotification = {
       id: String(++this.db.seq),
       notificationKey: key,
       recipientEmail: recipient,
@@ -83,15 +82,18 @@ export class FlowSimulator {
       orderId,
       isRead: false,
       createdAt: this.now(),
-    })
+    }
+    this.db.notifications.push(note)
     if (emailSubject) {
-      // Email failure is isolated: it never throws into order processing.
+      // Email failure is isolated: it only sets EmailStatus, never touches the order.
+      const failed = !!this.options.emailFails
       this.db.emails.push({
         to: recipient,
         subject: emailSubject,
-        status: this.options.emailFails ? 'failed' : 'sent',
+        status: failed ? 'failed' : 'sent',
         at: this.now(),
       })
+      note.emailStatus = failed ? 'Failed' : 'Sent'
     }
     this.changed()
   }
@@ -99,14 +101,12 @@ export class FlowSimulator {
   private async run(orderId: string): Promise<void> {
     const order = this.db.orders.find((o) => o.id === orderId)
     // Idempotent trigger: only brand-new orders are processed.
-    if (!order || order.processingStatus !== 'Pending') return
+    if (!order || order.status !== 'Pending' || order.processingStage !== 'New') return
     await this.pause()
 
     // Block while any other order is mid-flight or awaiting admin review.
     const blocker = this.db.orders.find(
-      (o) =>
-        o.id !== order.id &&
-        (o.processingStatus === 'Processing' || o.processingStatus === 'NeedsReview'),
+      (o) => o.id !== order.id && (o.status === 'Processing' || o.status === 'NeedsReview'),
     )
     if (blocker) {
       return this.reject(
@@ -124,7 +124,7 @@ export class FlowSimulator {
     }
     const cloth = this.db.clothes.find((c) => c.id === order.clothingId)
     if (!cloth || !cloth.isActive) return this.reject(order, 'This item is not available.')
-    const cost = this.db.costs.find((c) => c.costKey === `CURRENT-${cloth.id}`)
+    const cost = this.db.costs.find((c) => c.recordKey === `CURRENT-${cloth.id}`)
     if (!cost) return this.reject(order, 'This item is temporarily unavailable.')
     if (cloth.stock < qty) {
       return this.reject(order, `Insufficient stock. Only ${cloth.stock} available.`)
@@ -138,7 +138,7 @@ export class FlowSimulator {
     order.total = Math.round(cloth.price * qty * 100) / 100
     order.stockBefore = stockBefore
     order.stockAfter = stockAfter
-    order.processingStatus = 'Processing'
+    order.status = 'Processing'
     order.processingStage = 'Prepared'
     this.changed()
 
@@ -152,28 +152,27 @@ export class FlowSimulator {
       this.checkpoint('StockUpdated')
 
       const key = `SALE-${order.id}`
-      if (!this.db.costs.some((c) => c.costKey === key)) {
+      if (!this.db.costs.some((c) => c.recordKey === key)) {
         this.db.costs.push({
           id: String(++this.db.seq),
-          costKey: key,
+          recordKey: key,
           clothingId: cloth.id,
-          costType: 'SaleSnapshot',
+          costType: 'SaleCost',
           unitCost: cost.unitCost,
           orderId: order.id,
           quantity: qty,
         })
       }
-      order.processingStage = 'SnapshotCreated'
-      this.changed()
-      this.checkpoint('SnapshotCreated')
+      // There is no stage between StockUpdated and Completed, so an interruption
+      // here is resolved by checking whether SALE-<id> exists (docs/recovery.md).
+      this.checkpoint('Completed')
 
       order.status = 'Confirmed'
-      order.processingStatus = 'Completed'
-      order.processingStage = 'Confirmed'
+      order.processingStage = 'Completed'
       order.resultMessage = 'Order confirmed. Thank you!'
       this.changed()
     } catch {
-      order.processingStatus = 'NeedsReview'
+      order.status = 'NeedsReview'
       order.resultMessage =
         'Processing was interrupted and needs admin review. Payment is simulated; nothing was charged.'
       for (const admin of this.admins()) {
@@ -199,7 +198,7 @@ export class FlowSimulator {
         `Order ${order.id} confirmed: ${qty} x ${cloth.name}.`,
         `Selora order ${order.id} confirmed`,
       )
-      this.stockAlert(cloth, order)
+      this.stockAlert(cloth, order, stockBefore, stockAfter)
     } catch {
       /* best effort */
     }
@@ -209,27 +208,24 @@ export class FlowSimulator {
     return this.db.users.filter((u) => u.role === 'Admin').map((u) => u.email)
   }
 
-  private stockAlert(cloth: Clothing, order: Order): void {
-    const next: StockAlertState =
-      cloth.stock <= 0 ? 'Zero' : cloth.stock <= cloth.lowStockThreshold ? 'Low' : 'None'
-    if (ALERT_RANK[next] <= ALERT_RANK[cloth.stockAlertState]) return
-    const type = next === 'Zero' ? 'OutOfStock' : 'LowStock'
+  private stockAlert(cloth: Clothing, order: Order, before: number, after: number): void {
+    const crossing = stockCrossing(before, after, cloth.lowStockThreshold)
+    if (crossing === 'none') return
+    const type = crossing === 'zero' ? 'OutOfStock' : 'LowStock'
     const text =
-      next === 'Zero'
+      crossing === 'zero'
         ? `${cloth.name} is out of stock.`
-        : `${cloth.name} is low on stock (${cloth.stock} left).`
+        : `${cloth.name} is low on stock (${after} left).`
     for (const admin of this.admins()) {
       this.notify(
         admin,
         type,
-        `STOCK-${cloth.id}-${next}-${order.id}-${admin}`,
+        `STOCK-${cloth.id}-${crossing}-${order.id}-${admin}`,
         order.id,
         text,
         `Selora: ${text}`,
       )
     }
-    cloth.stockAlertState = next
-    this.changed()
   }
 
   private checkpoint(stage: ProcessingStage): void {

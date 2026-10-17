@@ -12,7 +12,7 @@ const c2 = () => svc(1)
 const admin = () => svc(2)
 const stock = (id: string) => db.clothes.find((c) => c.id === id)!.stock
 let n = 0
-const buy = (s: DemoShopService, clothingId: string, quantity = 1, pay: 'Success' | 'Failure' = 'Success', requestId = `req-${++n}`) =>
+const buy = (s: DemoShopService, clothingId: string, quantity = 1, pay: 'Success' | 'Failed' = 'Success', requestId = `req-${++n}`) =>
   s.placeOrder({ requestId, clothingId, quantity, simulatedPayment: pay })
 
 beforeEach(() => {
@@ -26,12 +26,12 @@ describe('purchases', () => {
     await flow.idle()
     const stored = db.orders.find((x) => x.id === o.id)!
     expect(stored.status).toBe('Confirmed')
-    expect(stored.processingStatus).toBe('Completed')
+    expect(stored.processingStage).toBe('Completed')
     expect(stored.total).toBe(13000)
     expect(stored.stockBefore).toBe(12)
     expect(stored.stockAfter).toBe(10)
     expect(stock('1')).toBe(10)
-    const snap = db.costs.find((c) => c.costKey === `SALE-${o.id}`)!
+    const snap = db.costs.find((c) => c.recordKey === `SALE-${o.id}`)!
     expect(snap.unitCost).toBe(3800)
     expect(snap.quantity).toBe(2)
     expect(db.notifications.filter((x) => x.recipientEmail === DEMO_USERS[0].email)).toHaveLength(1)
@@ -39,11 +39,11 @@ describe('purchases', () => {
   })
 
   it('rejects a failed payment without touching stock or costs', async () => {
-    await buy(c1(), '1', 2, 'Failure')
+    await buy(c1(), '1', 2, 'Failed')
     await flow.idle()
     expect(db.orders[0].status).toBe('Rejected')
     expect(stock('1')).toBe(12)
-    expect(db.costs.some((c) => c.costType === 'SaleSnapshot')).toBe(false)
+    expect(db.costs.some((c) => c.costType === 'SaleCost')).toBe(false)
   })
 
   it('rejects insufficient stock, inactive items and bad quantities', async () => {
@@ -127,10 +127,24 @@ describe('stock alerts', () => {
     expect(adminAlerts().filter((x) => x.type === 'OutOfStock')).toHaveLength(1)
 
     await admin().saveClothing({ ...db.clothes.find((c) => c.id === '3')!, stock: 10 })
-    expect(db.clothes.find((c) => c.id === '3')!.stockAlertState).toBe('None')
     await buy(c1(), '3', 8) // 10 -> 2: crosses again
     await flow.idle()
     expect(adminAlerts().filter((x) => x.type === 'LowStock')).toHaveLength(2)
+  })
+})
+
+describe('stock alert edge cases', () => {
+  it('sends only the zero alert when a sale goes from above threshold straight to zero', async () => {
+    await buy(c1(), '3', 4) // 4 -> 0, threshold 3
+    await flow.idle()
+    const alerts = db.notifications.filter((x) => x.recipientEmail === DEMO_USERS[2].email)
+    expect(alerts.map((x) => x.type)).toEqual(['OutOfStock'])
+  })
+
+  it('does not alert when an item that is already low is sold again', async () => {
+    await buy(c1(), '4', 1) // stock 1, threshold 2: already low, goes to 0 => zero only
+    await flow.idle()
+    expect(db.notifications.filter((x) => x.type === 'LowStock')).toHaveLength(0)
   })
 })
 
@@ -152,14 +166,14 @@ describe('historical cost snapshots', () => {
   })
 
   it('excludes rejected orders from revenue', async () => {
-    await buy(c1(), '2', 1, 'Failure')
+    await buy(c1(), '2', 1, 'Failed')
     await flow.idle()
     expect((await admin().getSalesSummary()).confirmedRevenue).toBe(0)
   })
 })
 
 describe('reliability', () => {
-  it.each(['Prepared', 'StockUpdated', 'SnapshotCreated'] as const)(
+  it.each(['Prepared', 'StockUpdated', 'Completed'] as const)(
     'marks an order interrupted after %s as NeedsReview and blocks further processing',
     async (stage) => {
       flow.options.failAfter = stage
@@ -167,8 +181,7 @@ describe('reliability', () => {
       await flow.idle()
       flow.options.failAfter = null
       const stored = db.orders.find((x) => x.id === o.id)!
-      expect(stored.processingStatus).toBe('NeedsReview')
-      expect(stored.status).not.toBe('Confirmed')
+      expect(stored.status).toBe('NeedsReview')
       expect(db.notifications.some((x) => x.type === 'NeedsReview')).toBe(true)
 
       // A later order must not touch stock while the review is open.
@@ -180,7 +193,7 @@ describe('reliability', () => {
       // The interrupted order's stock is deducted at most once.
       expect(stock('1')).toBe(stage === 'Prepared' ? 12 : 10)
       // Never more than one snapshot per order.
-      expect(db.costs.filter((c) => c.costKey === `SALE-${o.id}`).length).toBeLessThanOrEqual(1)
+      expect(db.costs.filter((c) => c.recordKey === `SALE-${o.id}`).length).toBeLessThanOrEqual(1)
     },
   )
 
@@ -189,7 +202,7 @@ describe('reliability', () => {
     await flow.idle()
     await flow.enqueue(o.id)
     expect(stock('1')).toBe(11)
-    expect(db.costs.filter((c) => c.costKey === `SALE-${o.id}`)).toHaveLength(1)
+    expect(db.costs.filter((c) => c.recordKey === `SALE-${o.id}`)).toHaveLength(1)
   })
 
   it('keeps the order confirmed when email fails', async () => {

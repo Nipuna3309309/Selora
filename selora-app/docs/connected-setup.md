@@ -3,13 +3,9 @@
 Site: `https://netorgft6455485.sharepoint.com/sites/NipunaAutomateTesting`
 Environment ID (from `power.config.json`): `d103abf7-e138-ed3d-8de2-57f89b56ff97`
 
-## 0. Reconcile the schema first
-The lists were created with column names that differ from `src/live/columns.ts` (for example `SKU`,
-`SellingPrice`, `StockQuantity`, `LowStockLevel`, `RecordKey`, `NotificationKey`, lookup and Person columns).
-Update `columns.ts`, the types, the mapping in `LiveShopService.ts` and the flow expressions to the real
-**internal** names and choice values. Any column the app/flow needs that does not exist yet (for example the flow-written
-order fields, `SimulatedPayment`, `StockAlertState`) must be added. See `sharepoint-setup.md`.
-
+## 0. Align the code with the lists
+The code already uses the real list/column names (`src/live/columns.ts`). Before wiring the gateway, confirm each internal name against the generated
+models, and add the `NeedsReview` choice to `Notifications.NotificationType` (see `sharepoint-setup.md`).
 ## 1. Permissions and flow
 Apply `sharepoint-setup.md` (groups, permission levels, unique permissions), then build the flow from
 `power-automate-flow.md` and turn it on.

@@ -45,9 +45,9 @@ and stock, and serialises runs (concurrency 1). Unique keys (`RequestId`, `SALE-
 prevent duplicate orders, snapshots and notifications.
 
 ## What has and has not been verified
-Verified locally: `tsc`, ESLint, production build, 15 automated tests (success, failed payment, insufficient stock,
-duplicate submit, last-item race, tampered price, role restrictions, low/zero alert suppression and re-arming,
-historical cost snapshots, interruption at each stage, email failure).
+Verified locally: `tsc`, ESLint, production build, 17 automated tests (success, failed payment, insufficient stock,
+duplicate submit, last-item race, tampered price, role restrictions, low/zero alert crossings and suppression,
+historical cost records, interruption at each stage, email failure).
 
 **Not verified:** Microsoft sign-in, SharePoint permissions, the Power Automate flow (not built yet), emails, the
 generated-service gateway, desktop/mobile browser layout checks (the browser extension was unavailable), deployment.
