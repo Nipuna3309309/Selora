@@ -1,8 +1,7 @@
 /**
  * SharePoint list and column names, as created on the NipunaAutomateTesting site.
  * ID, Title, Created and Created By are built in. Keep this file as the only place
- * these names appear in the app. Pending: confirm the internal names with the
- * generated Code Apps models once the data sources are added.
+ * these names appear in the app. They match the generated models in src/generated.
  */
 export const LISTS = {
   users: 'Users',

@@ -11,16 +11,16 @@ Apply `sharepoint-setup.md` (groups, permission levels, unique permissions), the
 `power-automate-flow.md` and turn it on.
 
 ## 2. Add data sources to the Code App
+Use only the **Nipun demo** solution (`Nipundemo`, ID `53d6deb3-feaf-f111-aaad-70a8a5044583`) and its SharePoint
+connection reference `sriq_sharedsharepointonline_0e890`. Never bind a personal connection ID (`-c`).
 ```
 npm run build
 pac auth create --environment d103abf7-e138-ed3d-8de2-57f89b56ff97
-pac connection list
-pac code add-data-source -a shared_sharepointonline -c <connection-id> -d "https://netorgft6455485.sharepoint.com/sites/NipunaAutomateTesting" -t Clothes
+pac code add-data-source -a shared_sharepointonline -cr sriq_sharedsharepointonline_0e890 -s 53d6deb3-feaf-f111-aaad-70a8a5044583 -d "https://netorgft6455485.sharepoint.com/sites/NipunaAutomateTesting" -t Clothes
 # repeat for Users, ClothingCosts, Orders, Notifications
 ```
-This generates models/services under `src/generated`. Do not hand-write or edit them.
-Then implement `createGateway()` in `src/live/gateway.ts` on top of them: normalise Person columns to
-`CreatedByEmail`, lookups to their ID, and throw `UniqueViolationError` on unique-index conflicts.
+This generates models/services under `src/generated` (already done for all five lists). Do not hand-write or
+edit them. `src/live/gateway.ts` is built on top of them.
 
 ## 3. Test in the tenant (checklist, none done yet)
 - Sign in as an admin and as two different customers (customers must **not** be site Members).
@@ -31,13 +31,13 @@ Then implement `createGateway()` in `src/live/gateway.ts` on top of them: normal
 - Layout on desktop and a phone.
 
 ## 4. Deploy
-Power Apps solution (as supplied): `solutions/53d6deb3-feaf-f111-aaad-70a8a5044583`. Put the app and the
-flow in this solution. Confirm the exact `pac code push` option for targeting a solution with
-`pac code push --help` for your CLI version before running it; this has not been tried.
+Power Apps solution: **Nipun demo** (`Nipundemo`, ID `53d6deb3-feaf-f111-aaad-70a8a5044583`). The app and the
+flow go in this solution only. A plain `pac code push` would put the app in the Default solution, so always pass
+the solution (option confirmed in `pac code push --help`; the push itself has not been tried).
 
 ```
-VITE_DATA_MODE=live npm run build
-pac code push
+npm run build
+pac code push --solutionName Nipundemo
 ```
 Share the app with the customer group in the Power Apps admin portal and confirm each user has a Power Apps
 licence/access and the SharePoint permissions above.

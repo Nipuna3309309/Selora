@@ -22,6 +22,8 @@ export const round4 = (n: number): number => Math.round((n + Number.EPSILON) * 1
 const lkr = new Intl.NumberFormat('en-LK', {
   style: 'currency',
   currency: 'LKR',
+  // Whole rupees read cleaner on a price tag; cents appear only when present.
+  minimumFractionDigits: 0,
   maximumFractionDigits: 2,
 })
 export const formatLkr = (n: number): string => lkr.format(n)

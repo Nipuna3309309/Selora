@@ -1,4 +1,7 @@
 import { useMemo, useState } from 'react'
+import { Icon } from '../components/Icon'
+import { Sheet } from '../components/Sheet'
+import { Stepper } from '../components/Stepper'
 import { formatLkr } from '../domain/format'
 import type { Clothing, SimulatedPayment } from '../domain/types'
 import { useApp } from '../context'
@@ -6,10 +9,13 @@ import { usePolled } from '../usePolled'
 
 const MAX_QTY = 10
 
-function unavailableReason(c: Clothing): string | null {
-  if (!c.isActive) return 'Unavailable'
-  if (c.stock <= 0) return 'Out of stock'
-  return null
+type Availability = { kind: 'ok' | 'low' | 'out' | 'off'; text: string }
+
+function availability(c: Clothing): Availability {
+  if (!c.isActive) return { kind: 'off', text: 'Not available' }
+  if (c.stock <= 0) return { kind: 'out', text: 'Sold out' }
+  if (c.stock <= c.lowStockThreshold) return { kind: 'low', text: `Only ${c.stock} left` }
+  return { kind: 'ok', text: `${c.stock} in stock` }
 }
 
 export function ShopPage({ onOrdered }: { onOrdered: () => void }) {
@@ -20,7 +26,7 @@ export function ShopPage({ onOrdered }: { onOrdered: () => void }) {
   const [checkout, setCheckout] = useState<{ item: Clothing; qty: number } | null>(null)
 
   const categories = useMemo(
-    () => ['All', ...Array.from(new Set((data ?? []).map((c) => c.category))).sort()],
+    () => ['All', ...Array.from(new Set((data ?? []).map((c) => c.category).filter(Boolean))).sort()],
     [data],
   )
   const shown = (data ?? []).filter(
@@ -28,33 +34,81 @@ export function ShopPage({ onOrdered }: { onOrdered: () => void }) {
       (category === 'All' || c.category === category) &&
       `${c.name} ${c.colour} ${c.size} ${c.category}`.toLowerCase().includes(search.trim().toLowerCase()),
   )
+  const filtering = search.trim() !== '' || category !== 'All'
 
   return (
-    <section>
-      <div className="toolbar">
-        <input
-          type="search"
-          placeholder="Search clothing"
-          aria-label="Search clothing"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <select aria-label="Category" value={category} onChange={(e) => setCategory(e.target.value)}>
-          {categories.map((c) => (
-            <option key={c}>{c}</option>
-          ))}
-        </select>
+    <section aria-labelledby="shop-title">
+      <div className="page-head">
+        <h2 id="shop-title">Shop</h2>
+        {data && (
+          <p className="muted">
+            {shown.length} {shown.length === 1 ? 'piece' : 'pieces'}
+          </p>
+        )}
       </div>
-      {error && <p className="error" role="alert">{error}</p>}
-      {loading && <p className="muted">Loading clothing…</p>}
-      {!loading && shown.length === 0 && <p className="muted">No clothing matches your search.</p>}
+
+      <div className="finder">
+        <label className="search">
+          <Icon name="search" size={18} />
+          <span className="sr-only">Search clothing</span>
+          <input
+            type="search"
+            placeholder="Search by name, colour or size"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </label>
+        <div className="chips" role="group" aria-label="Category">
+          {categories.map((c) => (
+            <button key={c} className="chip-btn" aria-pressed={category === c} onClick={() => setCategory(c)}>
+              {c}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {error && (
+        <div className="notice notice-bad" role="alert">
+          <p>Couldn't load the clothing. {error}</p>
+          <button className="btn" onClick={() => void reload()}>
+            Try again
+          </button>
+        </div>
+      )}
+
+      {loading && (
+        <div className="grid" aria-busy="true" aria-label="Loading clothing">
+          {Array.from({ length: 6 }, (_, i) => (
+            <div key={i} className="tile tile-skel" aria-hidden="true" />
+          ))}
+        </div>
+      )}
+
+      {!loading && !error && shown.length === 0 && (
+        <div className="empty">
+          <p>{filtering ? 'Nothing matches that search.' : 'No clothing has been added yet.'}</p>
+          {filtering && (
+            <button
+              className="btn"
+              onClick={() => {
+                setSearch('')
+                setCategory('All')
+              }}
+            >
+              Clear search and filters
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="grid">
         {shown.map((c) => (
-          <ClothingCard key={c.id} item={c} onBuy={(qty) => setCheckout({ item: c, qty })} />
+          <Tile key={c.id} item={c} onBuy={(qty) => setCheckout({ item: c, qty })} />
         ))}
       </div>
+
       {checkout && (
-        <CheckoutDialog
+        <CheckoutSheet
           item={checkout.item}
           qty={checkout.qty}
           onClose={() => {
@@ -71,33 +125,39 @@ export function ShopPage({ onOrdered }: { onOrdered: () => void }) {
   )
 }
 
-function ClothingCard({ item, onBuy }: { item: Clothing; onBuy: (qty: number) => void }) {
+function Tile({ item, onBuy }: { item: Clothing; onBuy: (qty: number) => void }) {
   const [qty, setQty] = useState(1)
-  const blocked = unavailableReason(item)
+  const a = availability(item)
+  const blocked = a.kind === 'out' || a.kind === 'off'
   const max = Math.max(1, Math.min(MAX_QTY, item.stock))
   return (
-    <article className={`card${blocked ? ' card-off' : ''}`}>
-      <img src={item.photoUrl} alt={item.name} loading="lazy" />
-      <div className="card-body">
+    <article className={`tile${blocked ? ' tile-off' : ''}`}>
+      <div className="photo">
+        {item.photoUrl ? (
+          <img src={item.photoUrl} alt={item.name} loading="lazy" />
+        ) : (
+          <div className="photo-empty">No photo</div>
+        )}
+        {item.size && (
+          <span className="size-tag" aria-label={`Size ${item.size}`}>
+            {item.size}
+          </span>
+        )}
+        {blocked && <span className="sold-band">{a.text}</span>}
+      </div>
+      <div className="tile-info">
         <h3>{item.name}</h3>
-        <p className="price">{formatLkr(item.price)}</p>
         <p className="muted">
-          Size {item.size} · {item.colour}
+          {item.colour}
+          {item.category ? `, ${item.category}` : ''}
         </p>
-        <p className={item.stock > 0 && item.isActive ? 'stock' : 'stock stock-out'}>
-          {blocked ?? `${item.stock} in stock`}
-        </p>
+        <p className="price">{formatLkr(item.price)}</p>
+        {/* Sold-out state already shows on the photo and the button, so this line stays an empty spacer to keep rows aligned. */}
+        <p className={`avail avail-${a.kind}`}>{blocked ? ' ' : a.text}</p>
         <div className="buy-row">
-          <label>
-            <span className="sr-only">Quantity for {item.name}</span>
-            <select value={qty} disabled={!!blocked} onChange={(e) => setQty(Number(e.target.value))}>
-              {Array.from({ length: max }, (_, i) => i + 1).map((n) => (
-                <option key={n}>{n}</option>
-              ))}
-            </select>
-          </label>
-          <button className="primary" disabled={!!blocked} onClick={() => onBuy(Math.min(qty, max))}>
-            {blocked ?? 'Buy'}
+          <Stepper value={qty} max={max} onChange={setQty} label={`Quantity of ${item.name}`} disabled={blocked} />
+          <button className="btn btn-buy" disabled={blocked} onClick={() => onBuy(Math.min(qty, max))}>
+            {blocked ? a.text : 'Buy'}
           </button>
         </div>
       </div>
@@ -105,7 +165,7 @@ function ClothingCard({ item, onBuy }: { item: Clothing; onBuy: (qty: number) =>
   )
 }
 
-function CheckoutDialog({
+function CheckoutSheet({
   item,
   qty,
   onClose,
@@ -117,7 +177,7 @@ function CheckoutDialog({
   onDone: () => void
 }) {
   const { service } = useApp()
-  // One stable RequestId per checkout: retries and double clicks reuse it.
+  // One RequestId per checkout: retries and double clicks reuse it, so they can't place a second order.
   const [requestId] = useState(() => `REQ-${crypto.randomUUID()}`)
   const [payment, setPayment] = useState<SimulatedPayment>('Success')
   const [busy, setBusy] = useState(false)
@@ -128,12 +188,7 @@ function CheckoutDialog({
     setBusy(true)
     setError(undefined)
     try {
-      await service.placeOrder({
-        requestId,
-        clothingId: item.id,
-        quantity: qty,
-        simulatedPayment: payment,
-      })
+      await service.placeOrder({ requestId, clothingId: item.id, quantity: qty, simulatedPayment: payment })
       onDone()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -142,35 +197,47 @@ function CheckoutDialog({
   }
 
   return (
-    <div className="overlay" role="dialog" aria-modal="true" aria-label="Test checkout">
-      <div className="dialog">
-        <p className="banner banner-test">TEST CHECKOUT · No real payment is taken</p>
-        <h2>{item.name}</h2>
-        <p>
-          {qty} × {formatLkr(item.price)} = <strong>{formatLkr(item.price * qty)}</strong>
-        </p>
-        <p className="muted">The final price and stock are re-checked when the order is processed.</p>
-        <fieldset disabled={busy}>
-          <legend>Simulated payment result</legend>
-          <label className="radio">
-            <input type="radio" name="pay" checked={payment === 'Success'} onChange={() => setPayment('Success')} />
-            Payment succeeds
-          </label>
-          <label className="radio">
-            <input type="radio" name="pay" checked={payment === 'Failed'} onChange={() => setPayment('Failed')} />
-            Payment fails
-          </label>
-        </fieldset>
-        {error && <p className="error" role="alert">{error}</p>}
-        <div className="dialog-actions">
-          <button onClick={onClose} disabled={busy}>
-            Cancel
-          </button>
-          <button className="primary" onClick={() => void submit()} disabled={busy}>
-            {busy ? 'Placing order…' : error ? 'Retry order' : 'Place test order'}
-          </button>
+    <Sheet title="Test checkout" onClose={onClose} closeDisabled={busy}>
+      <p className="ticket">No real payment is taken. Choose the result you want to test.</p>
+
+      <div className="line-item">
+        {item.photoUrl && <img src={item.photoUrl} alt="" />}
+        <div>
+          <strong>{item.name}</strong>
+          <p className="muted">
+            {item.colour}, size {item.size}, quantity {qty}
+          </p>
         </div>
+        <span className="price">{formatLkr(item.price * qty)}</span>
       </div>
-    </div>
+      <p className="muted small">The price and stock are checked again when the order is processed.</p>
+
+      <fieldset className="choice" disabled={busy}>
+        <legend>Simulated payment result</legend>
+        <label className={payment === 'Success' ? 'on' : ''}>
+          <input type="radio" name="pay" checked={payment === 'Success'} onChange={() => setPayment('Success')} />
+          <span>Payment succeeds</span>
+        </label>
+        <label className={payment === 'Failed' ? 'on' : ''}>
+          <input type="radio" name="pay" checked={payment === 'Failed'} onChange={() => setPayment('Failed')} />
+          <span>Payment fails</span>
+        </label>
+      </fieldset>
+
+      {error && (
+        <p className="notice notice-bad" role="alert">
+          {error}
+        </p>
+      )}
+
+      <div className="sheet-actions">
+        <button className="btn" onClick={onClose} disabled={busy}>
+          Cancel
+        </button>
+        <button className="btn btn-primary" onClick={() => void submit()} disabled={busy}>
+          {busy ? 'Placing order…' : error ? 'Try again' : `Place test order, ${formatLkr(item.price * qty)}`}
+        </button>
+      </div>
+    </Sheet>
   )
 }

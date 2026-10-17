@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Sheet } from '../components/Sheet'
 import { formatLkr } from '../domain/format'
 import { CATEGORIES, SIZES, type Clothing, type ClothingInput } from '../domain/types'
 import { useApp } from '../context'
@@ -6,41 +7,55 @@ import { usePolled } from '../usePolled'
 import { OrderList } from './OrdersPage'
 
 type Tab = 'clothes' | 'costs' | 'orders' | 'sales'
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'clothes', label: 'Clothes' },
+  { id: 'costs', label: 'Buying costs' },
+  { id: 'orders', label: 'All orders' },
+  { id: 'sales', label: 'Sales' },
+]
 
 export function AdminPage() {
   const { service } = useApp()
   const [tab, setTab] = useState<Tab>('clothes')
   const orders = usePolled(() => service.listAllOrders(), [service], 3000)
-  const inFlight = (orders.data ?? []).filter(
-    (o) => o.status === 'Pending' || o.status === 'Processing',
-  ).length
+  const inFlight = (orders.data ?? []).filter((o) => o.status === 'Pending' || o.status === 'Processing').length
   const review = (orders.data ?? []).filter((o) => o.status === 'NeedsReview')
 
   return (
-    <section>
-      <h2>Admin</h2>
+    <section aria-labelledby="admin-title">
+      <div className="page-head">
+        <h2 id="admin-title">Admin</h2>
+      </div>
       {review.length > 0 && (
-        <p className="banner banner-warn" role="alert">
-          {review.length} order(s) need review (order {review.map((o) => o.id).join(', ')}). New orders are
-          rejected until each is resolved. Follow the recovery procedure in docs/recovery.md.
+        <p className="notice notice-warn" role="alert">
+          {review.length === 1 ? 'Order' : 'Orders'} {review.map((o) => o.id).join(', ')} {review.length === 1 ? 'needs' : 'need'} review.
+          New orders are rejected until {review.length === 1 ? 'it is' : 'they are'} resolved. See docs/recovery.md.
         </p>
       )}
       {inFlight > 0 && (
-        <p className="banner banner-wait">
-          {inFlight} order(s) are processing. Stock editing is locked until they finish.
+        <p className="notice">
+          {inFlight} {inFlight === 1 ? 'order is' : 'orders are'} being processed. Stock can't be edited until
+          {inFlight === 1 ? ' it finishes' : ' they finish'}.
         </p>
       )}
-      <div className="tabs" role="tablist">
-        {(['clothes', 'costs', 'orders', 'sales'] as Tab[]).map((t) => (
-          <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'tab on' : 'tab'} onClick={() => setTab(t)}>
-            {{ clothes: 'Clothes', costs: 'Buying costs', orders: 'All orders', sales: 'Sales' }[t]}
+      <div className="segmented" role="tablist" aria-label="Admin sections">
+        {TABS.map((t) => (
+          <button key={t.id} role="tab" aria-selected={tab === t.id} onClick={() => setTab(t.id)}>
+            {t.label}
           </button>
         ))}
       </div>
-      {tab === 'clothes' && <ClothesTab stockLocked={inFlight > 0} />}
-      {tab === 'costs' && <CostsTab />}
-      {tab === 'orders' && <OrderList orders={orders.data ?? []} showCustomer />}
-      {tab === 'sales' && <SalesTab refreshKey={(orders.data ?? []).map((o) => o.status).join()} />}
+      <div role="tabpanel">
+        {tab === 'clothes' && <ClothesTab stockLocked={inFlight > 0} />}
+        {tab === 'costs' && <CostsTab />}
+        {tab === 'orders' && (
+          <>
+            {orders.error && <p className="notice notice-bad" role="alert">{orders.error}</p>}
+            <OrderList orders={orders.data ?? []} showCustomer />
+          </>
+        )}
+        {tab === 'sales' && <SalesTab refreshKey={(orders.data ?? []).map((o) => o.status).join()} />}
+      </div>
     </section>
   )
 }
@@ -54,7 +69,7 @@ const BLANK: ClothingInput = {
   photoUrl: '',
   price: 0,
   stock: 0,
-  lowStockThreshold: 2,
+  lowStockThreshold: 5,
   isActive: true,
 }
 
@@ -64,31 +79,62 @@ function ClothesTab({ stockLocked }: { stockLocked: boolean }) {
   const [editing, setEditing] = useState<ClothingInput | null>(null)
   return (
     <div>
-      {error && <p className="error" role="alert">{error}</p>}
-      <button className="primary" onClick={() => setEditing({ ...BLANK })}>
-        Add clothing
-      </button>
-      <div className="list">
-        {(data ?? []).map((c: Clothing) => (
-          <article key={c.id} className="row-card">
-            <div className="row-head">
-              <strong>
-                {c.name} <span className="muted">({c.size}, {c.colour})</span>
-              </strong>
-              <button onClick={() => setEditing({ ...c })}>Edit</button>
-            </div>
-            <div>
-              {formatLkr(c.price)} · stock {c.stock} · low at {c.lowStockThreshold} ·{' '}
-              {c.isActive ? 'Active' : 'Inactive'}
-              {c.stock === 0 ? (
-                <span className="chip chip-bad">Out of stock</span>
-              ) : c.stock <= c.lowStockThreshold ? (
-                <span className="chip chip-warn">Low stock</span>
-              ) : null}
-            </div>
-          </article>
-        ))}
+      <div className="toolbar">
+        <button className="btn btn-primary" onClick={() => setEditing({ ...BLANK })}>
+          Add clothing
+        </button>
       </div>
+      {error && <p className="notice notice-bad" role="alert">{error}</p>}
+      <table className="table">
+        <thead>
+          <tr>
+            <th scope="col">Item</th>
+            <th scope="col">Details</th>
+            <th scope="col">Price</th>
+            <th scope="col">Stock</th>
+            <th scope="col">Status</th>
+            <th scope="col"><span className="sr-only">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {(data ?? []).map((c: Clothing) => (
+            <tr key={c.id}>
+              <td data-label="Item">
+                <div className="cell-item">
+                  {c.photoUrl ? <img src={c.photoUrl} alt="" /> : <span className="thumb-empty" />}
+                  <div>
+                    <strong>{c.name}</strong>
+                    <p className="muted small">{c.sku}</p>
+                  </div>
+                </div>
+              </td>
+              <td data-label="Details">
+                {c.category}, {c.size}, {c.colour}
+              </td>
+              <td data-label="Price">{formatLkr(c.price)}</td>
+              <td data-label="Stock">
+                {c.stock}
+                {c.stock === 0 ? (
+                  <span className="chip tone-bad">Out of stock</span>
+                ) : c.stock <= c.lowStockThreshold ? (
+                  <span className="chip tone-warn">Low</span>
+                ) : null}
+              </td>
+              <td data-label="Status">{c.isActive ? 'Active' : 'Hidden from buying'}</td>
+              <td>
+                <button className="btn" onClick={() => setEditing({ ...c })} aria-label={`Edit ${c.name}`}>
+                  Edit
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {data && data.length === 0 && (
+        <div className="empty">
+          <p>No clothing yet. Add the first piece to start selling.</p>
+        </div>
+      )}
       {editing && (
         <ClothingForm
           initial={editing}
@@ -120,15 +166,15 @@ function ClothingForm({
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(false)
   const set = <K extends keyof ClothingInput>(k: K, v: ClothingInput[K]) => setF((p) => ({ ...p, [k]: v }))
-  const text = (k: 'name' | 'sku' | 'photoUrl' | 'colour', label: string) => (
-    <label>
-      {label}
+  const text = (k: 'name' | 'sku' | 'photoUrl' | 'colour', label: string, wide?: boolean) => (
+    <label className={wide ? 'field wide' : 'field'}>
+      <span>{label}</span>
       <input value={f[k]} onChange={(e) => set(k, e.target.value)} />
     </label>
   )
   const choice = (k: 'category' | 'size', label: string, options: readonly string[]) => (
-    <label>
-      {label}
+    <label className="field">
+      <span>{label}</span>
       <select value={f[k]} onChange={(e) => set(k, e.target.value)}>
         {options.map((o) => (
           <option key={o}>{o}</option>
@@ -148,48 +194,55 @@ function ClothingForm({
     }
   }
   return (
-    <div className="overlay" role="dialog" aria-modal="true" aria-label="Edit clothing">
-      <div className="dialog">
-        <h2>{f.id ? 'Edit clothing' : 'Add clothing'}</h2>
-        <div className="form">
-          {text('name', 'Name')}
-          {text('sku', 'SKU (unique)')}
-          {choice('category', 'Category', CATEGORIES)}
-          {choice('size', 'Size', SIZES)}
-          {text('colour', 'Colour')}
-          {text('photoUrl', 'Photo URL')}
-          <label>
-            Price (LKR)
-            <input type="number" min={0} value={f.price} onChange={(e) => set('price', Number(e.target.value))} />
-          </label>
-          <label>
-            Stock
-            <input
-              type="number"
-              min={0}
-              step={1}
-              value={f.stock}
-              disabled={stockLocked}
-              onChange={(e) => set('stock', Number(e.target.value))}
-            />
-          </label>
-          <label>
-            Low-stock threshold
-            <input type="number" min={0} step={1} value={f.lowStockThreshold} onChange={(e) => set('lowStockThreshold', Number(e.target.value))} />
-          </label>
-          <label className="radio">
-            <input type="checkbox" checked={f.isActive} onChange={(e) => set('isActive', e.target.checked)} />
-            Active (can be bought)
-          </label>
-        </div>
-        {stockLocked && <p className="muted">Stock is locked while orders are processing.</p>}
-        {error && <p className="error" role="alert">{error}</p>}
-        <div className="dialog-actions">
-          <button onClick={onCancel} disabled={busy}>Cancel</button>
-          <button className="primary" onClick={() => void save()} disabled={busy}>Save</button>
-        </div>
+    <Sheet title={f.id ? 'Edit clothing' : 'Add clothing'} onClose={onCancel} closeDisabled={busy}>
+      <div className="form-grid">
+        {text('name', 'Name', true)}
+        {text('sku', 'SKU (must be unique)', true)}
+        {choice('category', 'Category', CATEGORIES)}
+        {choice('size', 'Size', SIZES)}
+        {text('colour', 'Colour')}
+        {text('photoUrl', 'Photo link', true)}
+        <label className="field">
+          <span>Price (LKR)</span>
+          <input type="number" min={0} value={f.price} onChange={(e) => set('price', Number(e.target.value))} />
+        </label>
+        <label className="field">
+          <span>Stock</span>
+          <input
+            type="number"
+            min={0}
+            step={1}
+            value={f.stock}
+            disabled={stockLocked}
+            onChange={(e) => set('stock', Number(e.target.value))}
+          />
+        </label>
+        <label className="field">
+          <span>Low-stock level</span>
+          <input
+            type="number"
+            min={0}
+            step={1}
+            value={f.lowStockThreshold}
+            onChange={(e) => set('lowStockThreshold', Number(e.target.value))}
+          />
+        </label>
+        <label className="check">
+          <input type="checkbox" checked={f.isActive} onChange={(e) => set('isActive', e.target.checked)} />
+          <span>Customers can buy this</span>
+        </label>
       </div>
-    </div>
+      {stockLocked && <p className="muted small">Stock is locked while orders are being processed.</p>}
+      {error && <p className="notice notice-bad" role="alert">{error}</p>}
+      <div className="sheet-actions">
+        <button className="btn" onClick={onCancel} disabled={busy}>
+          Cancel
+        </button>
+        <button className="btn btn-primary" onClick={() => void save()} disabled={busy}>
+          {busy ? 'Saving…' : 'Save changes'}
+        </button>
+      </div>
+    </Sheet>
   )
 }
 
@@ -198,55 +251,76 @@ function CostsTab() {
   const clothes = usePolled(() => service.listClothes(), [service])
   const costs = usePolled(() => service.listCosts(), [service], 5000)
   const [drafts, setDrafts] = useState<Record<string, string>>({})
-  const [msg, setMsg] = useState<string>()
+  const [msg, setMsg] = useState<{ text: string; bad: boolean }>()
 
   async function save(id: string) {
     try {
       await service.setCurrentCost(id, Number(drafts[id]))
-      setMsg('Cost saved. Past sales keep the cost recorded when they were made.')
+      setMsg({ text: 'Cost saved. Past sales keep the cost recorded when they were made.', bad: false })
       setDrafts((d) => {
-        const { [id]: _removed, ...rest } = d
-        void _removed
+        const rest = { ...d }
+        delete rest[id]
         return rest
       })
       await costs.reload()
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : String(e))
+      setMsg({ text: e instanceof Error ? e.message : String(e), bad: true })
     }
   }
 
   return (
     <div>
-      <p className="muted">Current buying cost per unit. Only new sales use a changed cost.</p>
-      {msg && <p role="status">{msg}</p>}
-      {costs.error && <p className="error" role="alert">{costs.error}</p>}
-      <div className="list">
-        {(clothes.data ?? []).map((c) => {
-          const cur = (costs.data ?? []).find((x) => x.recordKey === `CURRENT-${c.id}`)
-          return (
-            <article key={c.id} className="row-card row-head">
-              <span>
-                {c.name} <span className="muted">({c.size}, {c.colour})</span>
-                <br />
-                <span className="muted">{cur ? `Current: ${formatLkr(cur.unitCost)}` : 'No cost set: orders for this item are rejected'}</span>
-              </span>
-              <span className="inline">
-                <input
-                  type="number"
-                  min={0}
-                  aria-label={`New cost for ${c.name}`}
-                  value={drafts[c.id] ?? ''}
-                  placeholder="New cost"
-                  onChange={(e) => setDrafts((d) => ({ ...d, [c.id]: e.target.value }))}
-                />
-                <button disabled={drafts[c.id] === undefined || drafts[c.id] === ''} onClick={() => void save(c.id)}>
-                  Save
-                </button>
-              </span>
-            </article>
-          )
-        })}
-      </div>
+      <p className="muted">What each piece costs you now. Only new sales use a changed cost.</p>
+      {msg && (
+        <p className={`notice${msg.bad ? ' notice-bad' : ''}`} role="status">
+          {msg.text}
+        </p>
+      )}
+      {costs.error && <p className="notice notice-bad" role="alert">{costs.error}</p>}
+      <table className="table">
+        <thead>
+          <tr>
+            <th scope="col">Item</th>
+            <th scope="col">Current cost</th>
+            <th scope="col">New cost (LKR)</th>
+            <th scope="col"><span className="sr-only">Save</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {(clothes.data ?? []).map((c) => {
+            const cur = (costs.data ?? []).find((x) => x.recordKey === `CURRENT-${c.id}`)
+            const draft = drafts[c.id] ?? ''
+            return (
+              <tr key={c.id}>
+                <td data-label="Item">
+                  <strong>{c.name}</strong>
+                  <p className="muted small">
+                    {c.size}, {c.colour}
+                  </p>
+                </td>
+                <td data-label="Current cost">
+                  {cur ? formatLkr(cur.unitCost) : <span className="tone-warn-text">Not set. Orders for this item are rejected.</span>}
+                </td>
+                <td data-label="New cost (LKR)">
+                  <input
+                    className="cost-input"
+                    type="number"
+                    min={0}
+                    aria-label={`New cost for ${c.name}`}
+                    value={draft}
+                    onChange={(e) => setDrafts((d) => ({ ...d, [c.id]: e.target.value }))}
+                  />
+                </td>
+                <td>
+                  <button className="btn" disabled={draft === ''} onClick={() => void save(c.id)}>
+                    Save cost
+                  </button>
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
     </div>
   )
 }
@@ -254,29 +328,29 @@ function CostsTab() {
 function SalesTab({ refreshKey }: { refreshKey: string }) {
   const { service } = useApp()
   const { data, error } = usePolled(() => service.getSalesSummary(), [service, refreshKey])
-  if (error) return <p className="error" role="alert">{error}</p>
-  if (!data) return <p className="muted">Loading…</p>
+  if (error) return <p className="notice notice-bad" role="alert">{error}</p>
+  if (!data) return <div className="slip slip-skel" aria-busy="true" aria-label="Loading sales" />
   return (
     <div>
-      <div className="stats">
-        <Stat label="Confirmed sales revenue" value={formatLkr(data.confirmedRevenue)} />
-        <Stat label="Units sold" value={String(data.unitsSold)} />
-        <Stat label="Cost of goods sold" value={formatLkr(data.costOfGoodsSold)} />
-        <Stat label="Gross profit" value={formatLkr(data.grossProfit)} />
-      </div>
+      <dl className="ledger">
+        <div>
+          <dt>Confirmed sales</dt>
+          <dd>{formatLkr(data.confirmedRevenue)}</dd>
+        </div>
+        <div className="less">
+          <dt>Cost of goods sold</dt>
+          <dd>{formatLkr(data.costOfGoodsSold)}</dd>
+        </div>
+        <div className="total">
+          <dt>Gross profit</dt>
+          <dd>{formatLkr(data.grossProfit)}</dd>
+        </div>
+      </dl>
       <p className="muted">
-        Gross profit = confirmed sales revenue − cost recorded at the time of each sale. Expenses are not
-        included, so this is not net profit. Based on {data.confirmedOrders} confirmed order(s).
+        {data.unitsSold} {data.unitsSold === 1 ? 'unit' : 'units'} sold across {data.confirmedOrders} confirmed{' '}
+        {data.confirmedOrders === 1 ? 'order' : 'orders'}. Gross profit is sales minus the cost recorded at the
+        time of each sale. Expenses are not included, so this is not net profit.
       </p>
-    </div>
-  )
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="stat">
-      <div className="muted">{label}</div>
-      <div className="stat-value">{value}</div>
     </div>
   )
 }

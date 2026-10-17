@@ -1,10 +1,12 @@
 # The Power Automate flow (build it by hand)
 
 One flow: **Selora – Process Order**. It is the only thing that changes stock, prices, totals, statuses and
-cost records. The local demo (`src/demo/flowSimulator.ts`) implements exactly these steps and
-`src/demo/flow.test.ts` tests them. **The real flow has not been built or run yet.**
+cost records. Until it is built and turned on, orders placed in the app stay **Pending**.
+**The flow has not been built or run yet.**
 
-Connections: *SharePoint* and *Office 365 Outlook*, owned by an account in `Selora Admins`.
+Create the flow **inside the Nipun demo solution** (`Nipundemo`) and use only its connection references:
+SharePoint = `sriq_sharedsharepointonline_0e890`. The connection behind it is owned by an account in `Selora Admins`.
+Office 365 Outlook = a new connection reference you add to Nipun demo (see "Email configuration").
 Below, `T` means the trigger's dynamic content and "Cloth" the clothing row re-read in step 5.
 
 ## 1. Trigger
@@ -95,5 +97,10 @@ For each admin create the notification (key `STOCK-@{Cloth ID}-@{crossing}-@{T I
 4. Re-add `Selora Admins` the same way, because breaking inheritance removes them.
 
 ## Email configuration
-Office 365 Outlook connection, "Send an email (V2)", sent as the connection owner (or a shared mailbox if available). Emails contain only
-order numbers and item names.
+Before building the flow, add the Outlook connection reference **inside Nipun demo** (not in the Default solution):
+1. make.powerapps.com > Development environment > Solutions > **Nipun demo** > New > More > Connection reference.
+2. Display name `Selora Outlook`, connector **Office 365 Outlook**, connection owned by an account in `Selora Admins`. Save.
+3. Note its logical name (`sriq_...`) and record it in the "Connections" line at the top of this file.
+
+In the flow, every "Send an email (V2)" action uses that connection reference, sent as the connection owner (or a shared
+mailbox if available). Emails contain only order numbers and item names.

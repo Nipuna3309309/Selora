@@ -3,7 +3,6 @@ import type { ShopService } from './services/ShopService'
 
 export interface AppCtx {
   service: ShopService
-  mode: 'demo' | 'live'
 }
 
 export const AppContext = createContext<AppCtx | null>(null)

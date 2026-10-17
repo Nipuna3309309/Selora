@@ -1,4 +1,5 @@
 import { getContext } from '@microsoft/power-apps/app'
+import * as gen from '../generated'
 import type { ListName } from './columns'
 
 /**
@@ -71,14 +72,8 @@ function unwrap<T>(r: OperationResult<T>, what: string): T {
   return r.data
 }
 
-/**
- * Builds the gateway on the generated services. The import is lazy because the
- * generated services start the Power Apps data client as soon as they load, which
- * must never happen in demo mode. Failures are thrown, never swallowed: live mode
- * does not fall back to demo data.
- */
-export async function createGateway(): Promise<SharePointGateway> {
-  const gen = await import('../generated')
+/** Builds the gateway on the generated services. Failures are thrown, never swallowed. */
+export function createGateway(): SharePointGateway {
   const services: Record<ListName, ListService> = {
     Users: gen.Users_1Service as unknown as ListService,
     Clothes: gen.Clothes_1Service as unknown as ListService,

@@ -1,10 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { getContext } from '@microsoft/power-apps/app'
+import { Icon, type IconName } from './components/Icon'
 import { AppContext } from './context'
-import { DATA_MODE, DEMO_FLOW_DELAY_MS } from './config'
-import { DemoShopService } from './demo/DemoShopService'
-import { FlowSimulator } from './demo/flowSimulator'
-import { DEMO_USERS, loadDb, resetDb, saveDb, type DemoDb } from './demo/store'
 import { createGateway } from './live/gateway'
 import { LiveShopService } from './live/LiveShopService'
 import { AdminPage } from './pages/AdminPage'
@@ -16,64 +13,27 @@ import { usePolled } from './usePolled'
 
 type Page = 'shop' | 'orders' | 'notifications' | 'admin'
 
-export default function App() {
-  return DATA_MODE === 'demo' ? <DemoApp /> : <LiveApp />
-}
-
-function DemoApp() {
-  const [state, setState] = useState(() => {
-    const db = loadDb()
-    const persist = () => saveDb(db)
-    const flow = new FlowSimulator(db, { delayMs: DEMO_FLOW_DELAY_MS, onChange: persist })
-    // Orders left pending by a reload are picked up again, like a trigger would.
-    db.orders.filter((o) => o.status === 'Pending').forEach((o) => void flow.enqueue(o.id))
-    return { db, flow, persist }
-  })
-  const [userIdx, setUserIdx] = useState(0)
-  const [resets, setResets] = useState(0)
-  const service = useMemo(
-    () => new DemoShopService(state.db, state.flow, DEMO_USERS[userIdx], state.persist),
-    [state, userIdx],
-  )
-
-  function reset() {
-    const db: DemoDb = resetDb()
-    const persist = () => saveDb(db)
-    setResets((n) => n + 1)
-    setState({ db, flow: new FlowSimulator(db, { delayMs: DEMO_FLOW_DELAY_MS, onChange: persist }), persist })
-  }
-
+function Wordmark() {
   return (
-    <>
-      <div className="banner banner-demo">
-        <strong>DEMO MODE</strong> · sample data stored in this browser only. Test user:
-        <select aria-label="Demo test user" value={userIdx} onChange={(e) => setUserIdx(Number(e.target.value))}>
-          {DEMO_USERS.map((u, i) => (
-            <option key={u.email} value={i}>
-              {u.name} ({u.role})
-            </option>
-          ))}
-        </select>
-        <button onClick={reset}>Reset demo data</button>
-        <span className="muted"> Role switching is disabled in connected mode.</span>
-      </div>
-      {/* Remount on user switch/reset so every page reloads its data. */}
-      <Shell key={`${userIdx}-${resets}`} service={service} mode="demo" />
-    </>
+    <div className="wordmark" aria-label="Selora">
+      <span aria-hidden="true">Selora</span>
+      <svg className="thread" viewBox="0 0 96 10" aria-hidden="true" focusable="false">
+        <path d="M1 6 C 22 0, 40 10, 62 5 S 88 3, 95 5" />
+      </svg>
+    </div>
   )
 }
 
-function LiveApp() {
+export default function App() {
   const [service, setService] = useState<ShopService>()
   const [error, setError] = useState<string>()
   useEffect(() => {
     void (async () => {
       try {
         const ctx = await getContext()
-        const gw = await createGateway()
+        const gw = createGateway()
         setService(await LiveShopService.create(gw, ctx.user.fullName ?? ''))
       } catch (e) {
-        // No fallback to demo data: show the failure instead.
         setError(e instanceof Error ? e.message : String(e))
       }
     })()
@@ -81,17 +41,25 @@ function LiveApp() {
   if (error) {
     return (
       <main className="center">
+        <Wordmark />
         <h1>Selora can't connect</h1>
-        <p className="error" role="alert">{error}</p>
-        <p className="muted">Connected mode never shows demo data. Fix the connection and reload.</p>
+        <p className="notice notice-bad" role="alert">{error}</p>
+        <p className="muted">Check that you have access to the Selora SharePoint lists, then reload this page.</p>
       </main>
     )
   }
-  if (!service) return <main className="center"><p className="muted">Connecting…</p></main>
-  return <Shell service={service} mode="live" />
+  if (!service) {
+    return (
+      <main className="center" aria-busy="true">
+        <Wordmark />
+        <p className="muted">Connecting to the shop…</p>
+      </main>
+    )
+  }
+  return <Shell service={service} />
 }
 
-function Shell({ service, mode }: { service: ShopService; mode: 'demo' | 'live' }) {
+function Shell({ service }: { service: ShopService }) {
   const user = service.currentUser()
   const [page, setPage] = useState<Page>('shop')
   const [unreadTick, setUnreadTick] = useState(0)
@@ -99,26 +67,38 @@ function Shell({ service, mode }: { service: ShopService; mode: 'demo' | 'live' 
   const unread = (notes.data ?? []).filter((n) => !n.isRead).length
   const current = page === 'admin' && user.role !== 'Admin' ? 'shop' : page
 
-  const nav = (p: Page, label: string, badge?: number) => (
-    <button className={current === p ? 'nav on' : 'nav'} onClick={() => setPage(p)}>
-      {label}
-      {badge ? <span className="badge" aria-label={`${badge} unread`}>{badge}</span> : null}
+  const tab = (p: Page, label: string, icon: IconName, badge?: number) => (
+    <button
+      key={p}
+      className="tab"
+      aria-current={current === p ? 'page' : undefined}
+      onClick={() => setPage(p)}
+    >
+      <Icon name={icon} />
+      <span>{label}</span>
+      {badge ? (
+        <span className="badge">
+          {badge}
+          <span className="sr-only"> unread</span>
+        </span>
+      ) : null}
     </button>
   )
 
   return (
-    <AppContext.Provider value={{ service, mode }}>
+    <AppContext.Provider value={{ service }}>
       <header className="top">
-        <h1>Selora</h1>
-        <nav>
-          {nav('shop', 'Shop')}
-          {nav('orders', 'My Orders')}
-          {nav('notifications', 'Notifications', unread)}
-          {user.role === 'Admin' && nav('admin', 'Admin')}
+        <Wordmark />
+        <nav aria-label="Main">
+          {tab('shop', 'Shop', 'shirt')}
+          {tab('orders', 'My orders', 'receipt')}
+          {tab('notifications', 'Notifications', 'bell', unread)}
+          {user.role === 'Admin' && tab('admin', 'Admin', 'gauge')}
         </nav>
-        <span className="who">
-          {user.name} · {user.role}
-        </span>
+        <p className="who">
+          <span>{user.name}</span>
+          <span className="role">{user.role}</span>
+        </p>
       </header>
       <main>
         {current === 'shop' && <ShopPage onOrdered={() => setPage('orders')} />}

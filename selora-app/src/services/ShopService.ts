@@ -24,8 +24,8 @@ export class ConfigurationError extends Error {
 }
 
 /**
- * The only way the UI touches data. A demo adapter and a SharePoint adapter
- * implement it. Admin-only methods must throw AccessDeniedError for customers
+ * The only way the UI touches data. The SharePoint adapter (LiveShopService)
+ * implements it. Admin-only methods must throw AccessDeniedError for customers
  * (SharePoint enforces this independently with list permissions).
  */
 export interface ShopService {
