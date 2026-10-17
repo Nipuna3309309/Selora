@@ -1,0 +1,47 @@
+# Connected setup, testing and deployment
+
+Site: `https://netorgft6455485.sharepoint.com/sites/NipunaAutomateTesting`
+Environment ID (from `power.config.json`): `d103abf7-e138-ed3d-8de2-57f89b56ff97`
+
+## 0. Reconcile the schema first
+The lists were created with column names that differ from `src/live/columns.ts` (for example `SKU`,
+`SellingPrice`, `StockQuantity`, `LowStockLevel`, `RecordKey`, `NotificationKey`, lookup and Person columns).
+Update `columns.ts`, the types, the mapping in `LiveShopService.ts` and the flow expressions to the real
+**internal** names and choice values. Any column the app/flow needs that does not exist yet (for example the flow-written
+order fields, `SimulatedPayment`, `StockAlertState`) must be added. See `sharepoint-setup.md`.
+
+## 1. Permissions and flow
+Apply `sharepoint-setup.md` (groups, permission levels, unique permissions), then build the flow from
+`power-automate-flow.md` and turn it on.
+
+## 2. Add data sources to the Code App
+```
+npm run build
+pac auth create --environment d103abf7-e138-ed3d-8de2-57f89b56ff97
+pac connection list
+pac code add-data-source -a shared_sharepointonline -c <connection-id> -d "https://netorgft6455485.sharepoint.com/sites/NipunaAutomateTesting" -t Clothes
+# repeat for Users, ClothingCosts, Orders, Notifications
+```
+This generates models/services under `src/generated`. Do not hand-write or edit them.
+Then implement `createGateway()` in `src/live/gateway.ts` on top of them: normalise Person columns to
+`CreatedByEmail`, lookups to their ID, and throw `UniqueViolationError` on unique-index conflicts.
+
+## 3. Test in the tenant (checklist, none done yet)
+- Sign in as an admin and as two different customers (customers must **not** be site Members).
+- Run every check in `sharepoint-setup.md`.
+- Successful order, failed payment, insufficient stock, double-click, two customers buying the last item,
+  confirmation email, low/zero stock alert once only, cost change leaves old profit unchanged,
+  forced failure -> `NeedsReview` -> recovery procedure.
+- Layout on desktop and a phone.
+
+## 4. Deploy
+Power Apps solution (as supplied): `solutions/53d6deb3-feaf-f111-aaad-70a8a5044583`. Put the app and the
+flow in this solution. Confirm the exact `pac code push` option for targeting a solution with
+`pac code push --help` for your CLI version before running it; this has not been tried.
+
+```
+VITE_DATA_MODE=live npm run build
+pac code push
+```
+Share the app with the customer group in the Power Apps admin portal and confirm each user has a Power Apps
+licence/access and the SharePoint permissions above.
