@@ -9,7 +9,7 @@ import type { Clothing, ClothingCost, Order } from './types'
 
 export type RangeDays = 7 | 30 | 90
 export type Severity = 'critical' | 'warning' | 'info'
-export type AdminSection = 'clothes' | 'costs' | 'all-orders' | 'sales'
+export type AdminSection = 'clothes' | 'costs' | 'all-orders' | 'sales' | 'suppliers'
 
 export interface Totals {
   revenue: number
@@ -57,6 +57,8 @@ export interface Decision {
   impactLabel?: string
   action: string
   target: AdminSection
+  /** Set when the fix is more stock: the card can ask the sales person for it. */
+  restock?: { clothingId: string; name: string; quantity: number }
 }
 
 export interface Dashboard {
@@ -259,6 +261,7 @@ export function buildDashboard(
         impactLabel: missed ? `${lkrShort(missed.value)} turned away` : undefined,
         action: 'Update stock',
         target: 'clothes',
+        restock: { clothingId: c.id, name: c.name, quantity: Math.max(1, Math.ceil(perDay * REORDER_TO_DAYS)) },
       })
     } else if (c.stock > 0 && perDay > 0) {
       const cover = c.stock / perDay
@@ -273,6 +276,7 @@ export function buildDashboard(
           impactLabel: `${lkrShort(atRisk)} at risk in 2 weeks`,
           action: 'Update stock',
           target: 'clothes',
+          restock: { clothingId: c.id, name: c.name, quantity: Math.max(1, Math.ceil(perDay * REORDER_TO_DAYS - c.stock)) },
         })
       }
     }

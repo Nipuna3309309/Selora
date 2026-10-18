@@ -10,7 +10,9 @@ internal names must be confirmed against the generated Code Apps models. The `No
 ## Lists and columns
 
 ### Users
-`UserAccount` (Person, one only) · `Role` (Choice: Customer, Admin; default Customer).
+`UserAccount` (Person, one only) · `Role` (Choice: Customer, Admin, **Supplier**; default Customer).
+Suppliers get the restock emails. Add `Supplier` to the choices; admins then add or remove suppliers on the app's
+**Suppliers** page (it writes these rows; removing sets Role back to Customer). Suppliers need no site access.
 A user with no row is a Customer; the app and flow handle that, SharePoint cannot.
 
 ### Clothes
@@ -44,7 +46,8 @@ LowStock, OutOfStock) · `OrderItemId` (Number 0 dp) · `IsRead` (Yes/No, defaul
 `EmailStatus` (Choice: Pending, Sent, Failed).
 
 ## Small changes still needed on the lists
-1. **Notifications > NotificationType: add the choice `NeedsReview`.** The flow notifies admins when an order needs review.
+1. **Notifications > NotificationType: add the choices `NeedsReview` and `RestockRequest`.** The flow notifies admins when an
+   order needs review; `RestockRequest` rows come from the app's Request restock button (see `power-automate-flow.md`).
 2. **Title is required by default** on every list. Customers cannot fill it in through the app unprompted, so the app sets
    `Title = RequestId` on orders. Either keep that, or make Title optional on Orders. The flow should set Title on
    ClothingCosts (`= RecordKey`) and Notifications (`= NotificationKey`).

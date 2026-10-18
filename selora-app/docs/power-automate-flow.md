@@ -108,3 +108,20 @@ Before building the flow, add the Outlook connection reference **inside Nipun de
 
 In the flow, every "Send an email (V2)" action uses that connection reference, sent as the connection owner (or a shared
 mailbox if available). Emails contain only order numbers and item names.
+
+## Restock Request flow
+Flow **Selora – Restock Request** (ID `780f33aa-a6ca-f111-a05c-002248ee059c`) in the Nipun demo solution. Connection
+references: SharePoint `sriq_sharedsharepointonline_0e890`, Office 365 Outlook `sriq_sharedoffice365_54600`.
+
+- **Start:** admins press **Request restock** (Clothes table, for low or sold-out items, and on the dashboard's restock
+  decisions). The app adds a Notifications row: `NotificationType = RestockRequest`, `OrderItemId` = the clothing ID,
+  `Message` = optional note (the dashboard adds the suggested quantity), `EmailStatus = Pending`,
+  `NotificationKey = RESTOCK-<clothingId>-<timestamp>`.
+- **Flow:** polls Notifications every minute and acts only on `RestockRequest` rows. It reads the Users list for rows
+  with `Role = Supplier` and emails all of them (not the admins) with the item, SKU, size, colour, stock, low-stock
+  level, note and who asked. It then sets `EmailStatus` to `Sent`, or `Failed` if the email fails, the item is not
+  found, or no Supplier is set up.
+- **App:** shows "Sent to suppliers", then "Asked suppliers <time>, email sent" for 24 hours, with **Ask again**.
+- **Before use:** add the `RestockRequest` choice to `Notifications.NotificationType`, add the `Supplier` choice to
+  `Users.Role` and a Users row for each supplier, then turn the flow on.
+

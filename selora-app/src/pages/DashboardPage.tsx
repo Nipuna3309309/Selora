@@ -2,6 +2,7 @@ import { useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import { BarList, ChartCard, LineChart, Sparkline } from '../components/charts'
 import { CountUp } from '../components/CountUp'
 import { Icon, type IconName } from '../components/Icon'
+import { RestockButton } from '../components/RestockButton'
 import { useApp } from '../context'
 import {
   bucket,
@@ -14,6 +15,8 @@ import {
   type Severity,
 } from '../domain/dashboard'
 import { formatLkr } from '../domain/format'
+import { latestRestock } from '../domain/restock'
+import type { RestockRequest } from '../domain/types'
 import { usePolled } from '../usePolled'
 
 const RANGES: { days: RangeDays; label: string }[] = [
@@ -76,7 +79,19 @@ function Tile({ label, children, delta, trend, i }: {
   )
 }
 
-function DecisionCard({ d, i, onGo }: { d: Decision; i: number; onGo: (s: AdminSection) => void }) {
+function DecisionCard({
+  d,
+  i,
+  onGo,
+  lastRestock,
+  onRestocked,
+}: {
+  d: Decision
+  i: number
+  onGo: (s: AdminSection) => void
+  lastRestock?: RestockRequest
+  onRestocked: () => void
+}) {
   const s = SEVERITY[d.severity]
   return (
     <li className={`decision sev-${d.severity}`} style={{ '--i': i } as CSSProperties}>
@@ -90,6 +105,15 @@ function DecisionCard({ d, i, onGo }: { d: Decision; i: number; onGo: (s: AdminS
       </div>
       <div className="decision-side">
         {d.impactLabel && <span className="impact">{d.impactLabel}</span>}
+        {d.restock && (
+          <RestockButton
+            clothingId={d.restock.clothingId}
+            name={d.restock.name}
+            suggested={d.restock.quantity}
+            last={lastRestock}
+            onSent={onRestocked}
+          />
+        )}
         <button className="btn btn-small" onClick={() => onGo(d.target)}>
           {d.action}
           <Icon name="arrow" size={16} />
@@ -106,6 +130,8 @@ export function DashboardPage({ onGo }: { onGo: (s: AdminSection) => void }) {
   const orders = usePolled(() => service.listAllOrders(), [service], 5000)
   const clothes = usePolled(() => service.listClothes(), [service], 30000)
   const costs = usePolled(() => service.listCosts(), [service], 30000)
+  const restocks = usePolled(() => service.listRestockRequests(), [service], 15000)
+  const lastRestock = useMemo(() => latestRestock(restocks.data), [restocks.data])
   const error = orders.error ?? clothes.error ?? costs.error
   const ready = orders.data && clothes.data && costs.data
 
@@ -194,7 +220,14 @@ export function DashboardPage({ onGo }: { onGo: (s: AdminSection) => void }) {
           <>
             <ol className="decision-list">
               {shown.map((x, i) => (
-                <DecisionCard key={x.id} d={x} i={i} onGo={onGo} />
+                <DecisionCard
+                  key={x.id}
+                  d={x}
+                  i={i}
+                  onGo={onGo}
+                  lastRestock={x.restock && lastRestock.get(x.restock.clothingId)}
+                  onRestocked={() => void restocks.reload()}
+                />
               ))}
             </ol>
             {d.decisions.length > 4 && (

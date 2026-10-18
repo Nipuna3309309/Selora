@@ -1,3 +1,4 @@
+/** Users.Role also has Supplier (restock emails only); the app treats anyone not Admin as a Customer. */
 export type Role = 'Customer' | 'Admin'
 
 export interface AppUser {
@@ -91,6 +92,8 @@ export type NotificationType =
   | 'OutOfStock'
   /** Not in the lists as created: add this choice to Notifications.NotificationType. */
   | 'NeedsReview'
+  /** An admin asked for more stock; the Restock Request flow emails every Supplier in Users. Add this choice too. */
+  | 'RestockRequest'
 
 export type EmailStatus = 'Pending' | 'Sent' | 'Failed'
 
@@ -104,6 +107,23 @@ export interface AppNotification {
   orderId: string
   isRead: boolean
   emailStatus?: EmailStatus
+  createdAt: string
+}
+
+/** A Users row with Role = Supplier. Suppliers get the restock emails. */
+export interface Supplier {
+  id: string
+  email: string
+  name: string
+}
+
+/** A Notifications row of type RestockRequest. */
+export interface RestockRequest {
+  id: string
+  clothingId: string
+  note: string
+  /** Pending until the flow has emailed the sales person. */
+  emailStatus: EmailStatus
   createdAt: string
 }
 

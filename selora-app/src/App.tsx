@@ -30,6 +30,7 @@ const ADMIN_LINKS: { page: Page; label: string; icon: IconName }[] = [
   { page: 'costs', label: 'Buying costs', icon: 'coins' },
   { page: 'all-orders', label: 'All orders', icon: 'list' },
   { page: 'sales', label: 'Sales', icon: 'chart' },
+  { page: 'suppliers', label: 'Suppliers', icon: 'truck' },
 ]
 const ADMIN_PAGES = new Set<Page>(ADMIN_LINKS.map((l) => l.page))
 
@@ -227,9 +228,7 @@ function Shell({ service }: { service: ShopService }) {
             {current === 'orders' && <OrdersPage />}
             {current === 'notifications' && <NotificationsPage onChanged={() => setUnreadTick((t) => t + 1)} />}
             {current === 'dashboard' && <DashboardPage onGo={go} />}
-            {(current === 'clothes' || current === 'costs' || current === 'all-orders' || current === 'sales') && (
-              <AdminPage section={current} />
-            )}
+            {current !== 'dashboard' && ADMIN_PAGES.has(current) && <AdminPage section={current as AdminSection} />}
           </main>
         </div>
       </div>

@@ -7,7 +7,9 @@ import type {
   ClothingInput,
   NewOrderInput,
   Order,
+  RestockRequest,
   SalesSummary,
+  Supplier,
 } from '../domain/types'
 
 export class AccessDeniedError extends Error {
@@ -52,6 +54,15 @@ export interface ShopService {
   setCurrentCost(clothingId: string, unitCost: number): Promise<void>
   listAllOrders(): Promise<Order[]>
   getSalesSummary(): Promise<SalesSummary>
+  /** Asks the suppliers for more stock. The Restock Request flow emails every Supplier in Users. */
+  requestRestock(clothingId: string, note: string): Promise<RestockRequest>
+  /** Newest first. */
+  listRestockRequests(): Promise<RestockRequest[]>
+  listSuppliers(): Promise<Supplier[]>
+  /** Gives an organisation account the Supplier role (adds its Users row if missing). */
+  addSupplier(email: string): Promise<Supplier>
+  /** Sets the role back to Customer; the Users row is kept. */
+  removeSupplier(id: string): Promise<void>
 }
 
 export function isTerminal(o: Pick<Order, 'status'>): boolean {

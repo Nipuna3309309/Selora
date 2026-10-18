@@ -155,6 +155,9 @@ input:focus, select:focus { outline: none; border-color: var(--primary); box-sha
 input[type='checkbox'], input[type='radio'] { width: 20px; min-height: 0; height: 20px; accent-color: var(--primary); padding: 0; box-shadow: none; }
 .field { display: flex; flex-direction: column; gap: 6px; font-size: 0.9rem; font-weight: 600; }
 .field input, .field select { font-weight: 400; }
+.field [aria-invalid='true'] { border-color: var(--bad); box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 16%, transparent); }
+.field-error { display: inline-flex; align-items: flex-start; gap: 6px; font-size: 0.85rem; font-weight: 500; color: var(--text); animation: fade var(--med) var(--ease) both; }
+.field-error svg { flex: none; margin-top: 2px; color: var(--bad); }
 .check { display: flex; align-items: center; gap: 10px; min-height: 44px; }
 
 .notice { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 16px; border-radius: var(--r-m); background: var(--primary-soft); margin-bottom: 14px; animation: drop var(--med) var(--ease) both; }
@@ -421,6 +424,8 @@ td .chip { margin-left: 8px; }
   .table td[data-label='Item'] { display: block; }
   .table td[data-label='Item']::before { display: none; }
   .table td:last-child .btn { width: 100%; margin-top: 6px; }
+  .row-actions { width: 100%; flex-direction: column; align-items: stretch; }
+  .row-actions .restock { flex-direction: column; align-items: stretch; }
   .cost-input { max-width: 140px; }
 }
 
@@ -480,8 +485,23 @@ td .chip { margin-left: 8px; }
 .sev svg { color: var(--sev); }
 .decision h4 { margin: 0 0 2px; font-size: 1rem; font-weight: 700; }
 .decision-text p { font-size: 0.9rem; }
-.decision-side { display: flex; align-items: center; gap: 14px; }
+.decision-side { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px 14px; }
 .impact { font-size: 0.85rem; font-weight: 700; white-space: nowrap; }
+
+/* Auto SKU */
+.sku-auto { display: flex; align-items: center; min-height: 44px; padding: 0 14px; border: 1px dashed var(--line); border-radius: var(--r-m); background: var(--surface-2); font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: 0.04em; }
+
+/* Suppliers */
+.supplier-add { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 10px; margin: 14px 0; }
+.supplier-add .field { flex: 1 1 260px; max-width: 420px; }
+
+/* Restock request */
+.row-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.restock { display: inline-flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 6px 10px; }
+.restock-status { display: inline-flex; align-items: center; gap: 6px; font-size: 0.85rem; font-weight: 600; color: var(--text); animation: fade var(--med) var(--ease) both; }
+.restock-status svg { flex: none; color: var(--ok); }
+.restock-status.is-failed svg { color: var(--bad); }
+.restock-error { flex-basis: 100%; font-size: 0.85rem; padding: 4px 8px; border-radius: 6px; color: var(--text); background: color-mix(in srgb, var(--bad) 14%, var(--surface)); }
 .all-clear { display: flex; align-items: center; gap: 10px; font-weight: 600; }
 .all-clear svg { color: var(--ok); flex: none; width: 28px; height: 28px; padding: 4px; border-radius: 50%; background: color-mix(in srgb, var(--ok) 16%, var(--surface)); animation: pop 0.5s var(--spring); }
 .more { margin-top: 10px; }

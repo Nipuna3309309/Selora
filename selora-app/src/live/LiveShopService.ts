@@ -1,4 +1,5 @@
-import { validateClothingNumbers } from '../domain/alerts'
+import { validateClothing } from '../domain/validation'
+import { nextSku } from '../domain/sku'
 import type {
   AppNotification,
   AppUser,
@@ -8,8 +9,10 @@ import type {
   CheckoutInput,
   NewOrderInput,
   Order,
+  RestockRequest,
   Role,
   SalesSummary,
+  Supplier,
 } from '../domain/types'
 import { AccessDeniedError, computeSummary, type ShopService } from '../services/ShopService'
 import { COLS, LISTS, PHOTO_LIBRARY } from './columns'
@@ -28,6 +31,12 @@ const lookup = (id: string) => ({
   Id: Number(id),
 })
 const odata = (s: string): string => s.replace(/'/g, "''")
+/** Person columns are written with the account's claims; SharePoint resolves the rest. */
+const person = (email: string) => ({
+  '@odata.type': '#Microsoft.Azure.Connectors.SharePoint.SPListExpandedUser',
+  Claims: `i:0#.f|membership|${email}`,
+})
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 /** Choice columns can arrive as a string or `{ Value }`. */
 const choice = (v: unknown): string =>
@@ -104,6 +113,23 @@ function toNotification(r: SpRow): AppNotification {
     orderId: str(r[c.orderItemId]),
     isRead: r[c.isRead] === true,
     emailStatus: email ? (email as AppNotification['emailStatus']) : undefined,
+    createdAt: str(r.Created),
+  }
+}
+
+function toSupplier(r: SpRow): Supplier {
+  const account = r[COLS.users.userAccount] as { DisplayName?: unknown } | undefined
+  const email = personEmail(account)
+  return { id: str(r.ID), email, name: str(account?.DisplayName) || email }
+}
+
+function toRestock(r: SpRow): RestockRequest {
+  const c = COLS.notifications
+  return {
+    id: str(r.ID),
+    clothingId: str(r[c.orderItemId]),
+    note: str(r[c.message]),
+    emailStatus: (choice(r[c.emailStatus]) || 'Pending') as RestockRequest['emailStatus'],
     createdAt: str(r.Created),
   }
 }
@@ -235,9 +261,11 @@ export class LiveShopService implements ShopService {
   async saveClothing(input: ClothingInput): Promise<Clothing> {
     this.requireAdmin()
     if (!input.name.trim()) throw new Error('Name is required.')
-    if (!input.sku.trim()) throw new Error('SKU is required.')
-    if (!input.colour.trim()) throw new Error('Colour is required.')
-    validateClothingNumbers(input.price, input.stock, input.lowStockThreshold)
+    // Same checks as the form, in case anything else calls this. SKU uniqueness is SharePoint's job.
+    const problem = Object.values(validateClothing(input))[0]
+    if (problem) throw new Error(problem)
+    // New items with no SKU get the next number for their type (e.g. TSH-004).
+    const autoSku = !input.id && !input.sku.trim()
     const c = COLS.clothes
     const fields = {
       [c.name]: input.name,
@@ -251,10 +279,19 @@ export class LiveShopService implements ShopService {
       [c.lowStockThreshold]: input.lowStockThreshold,
       [c.isActive]: input.isActive,
     }
-    const row = input.id
-      ? await this.gw.updateItem(LISTS.clothes, input.id, fields)
-      : await this.gw.createItem(LISTS.clothes, fields)
-    return toClothing(row)
+    if (input.id) return toClothing(await this.gw.updateItem(LISTS.clothes, input.id, fields))
+    if (!autoSku) return toClothing(await this.gw.createItem(LISTS.clothes, fields))
+
+    const taken = (await this.listClothes()).map((x) => x.sku)
+    // SKU is unique in SharePoint, so if another admin took the number at the same moment, try the next one.
+    for (let skip = 0; ; skip++) {
+      const sku = nextSku(input.category, taken, skip)
+      try {
+        return toClothing(await this.gw.createItem(LISTS.clothes, { ...fields, [c.sku]: sku }))
+      } catch (e) {
+        if (!(e instanceof UniqueViolationError) || skip >= 4) throw e
+      }
+    }
   }
 
   async listCosts(): Promise<ClothingCost[]> {
@@ -289,5 +326,55 @@ export class LiveShopService implements ShopService {
     this.requireAdmin()
     const [orders, costs] = await Promise.all([this.listAllOrders(), this.listCosts()])
     return computeSummary(orders, costs)
+  }
+
+  async requestRestock(clothingId: string, note: string): Promise<RestockRequest> {
+    this.requireAdmin()
+    const c = COLS.notifications
+    const key = `RESTOCK-${clothingId}-${Date.now()}`
+    const item = (await this.listClothes()).find((x) => x.id === clothingId)
+    // OrderItemId carries the clothing ID: the flow looks the item up in Clothes and emails the suppliers.
+    const row = await this.gw.createItem(LISTS.notifications, {
+      Title: `Restock request: ${item?.name ?? clothingId}`,
+      [c.notificationKey]: key,
+      [c.type]: 'RestockRequest',
+      [c.orderItemId]: Number(clothingId),
+      [c.message]: note,
+      [c.emailStatus]: 'Pending',
+    })
+    return toRestock(row)
+  }
+
+  async listRestockRequests(): Promise<RestockRequest[]> {
+    this.requireAdmin()
+    const rows = await this.gw.getItems(LISTS.notifications, {
+      filter: `${COLS.notifications.type} eq 'RestockRequest'`,
+      orderBy: 'Created desc',
+    })
+    return rows.map(toRestock)
+  }
+
+  async listSuppliers(): Promise<Supplier[]> {
+    this.requireAdmin()
+    const rows = await this.gw.getItems(LISTS.users, { filter: `${COLS.users.role} eq 'Supplier'` })
+    return rows.map(toSupplier).sort((a, b) => a.name.localeCompare(b.name))
+  }
+
+  async addSupplier(email: string): Promise<Supplier> {
+    this.requireAdmin()
+    const e = email.trim().toLowerCase()
+    if (!EMAIL.test(e)) throw new Error('Enter an email address, like name@company.com.')
+    const u = COLS.users
+    const rows = await this.gw.getItems(LISTS.users, { filter: `${u.userAccount}/EMail eq '${odata(e)}'`, top: 1 })
+    if (rows[0] && choice(rows[0][u.role]) === 'Admin') throw new Error(`${e} is an admin. Admins can't also be suppliers.`)
+    const row = rows[0]
+      ? await this.gw.updateItem(LISTS.users, str(rows[0].ID), { [u.role]: 'Supplier' })
+      : await this.gw.createItem(LISTS.users, { Title: e, [u.userAccount]: person(e), [u.role]: 'Supplier' })
+    return toSupplier(row)
+  }
+
+  async removeSupplier(id: string): Promise<void> {
+    this.requireAdmin()
+    await this.gw.updateItem(LISTS.users, id, { [COLS.users.role]: 'Customer' })
   }
 }

@@ -24,6 +24,8 @@ const PATHS = {
   info: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0-10v6m0-9h.01',
   arrow: 'M5 12h14m-5-5 5 5-5 5',
   table: 'M4 5h16v14H4V5Zm0 5h16M4 14.5h16M10 5v14',
+  send: 'M21 3 3 10.5l7.5 3L21 3Zm0 0-7.5 18-3-7.5',
+  truck: 'M3 6h11v10H3V6Zm11 4h4l3 3v3h-7M7 19.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm10 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z',
 } as const
 
 export type IconName = keyof typeof PATHS
