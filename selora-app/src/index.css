@@ -195,7 +195,7 @@ input[type='checkbox'], input[type='radio'] { width: 20px; min-height: 0; height
 .badge { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--accent); color: var(--on-accent); font-size: 0.75rem; font-weight: 700; display: inline-grid; place-items: center; animation: pop 0.45s var(--spring); }
 
 .side-user { display: flex; align-items: center; gap: 10px; padding: 12px 10px 4px; border-top: 1px solid var(--line); line-height: 1.3; min-width: 0; }
-.side-user > span:last-child { display: flex; flex-direction: column; min-width: 0; }
+.side-user-name { display: flex; flex-direction: column; min-width: 0; }
 .side-user strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9rem; }
 .mode-switch { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 4px; border-radius: var(--r-m); background: var(--surface-2); }
 .mode-switch button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); font: inherit; font-size: 0.8rem; font-weight: 600; cursor: pointer; transition: background var(--fast), color var(--fast), box-shadow var(--med) var(--ease); }
@@ -203,6 +203,9 @@ input[type='checkbox'], input[type='radio'] { width: 20px; min-height: 0; height
 .mode-switch button[aria-checked='true'] { background: var(--surface); color: var(--text); box-shadow: var(--shadow-m); }
 .mode-switch button[aria-checked='true'] svg { animation: pop var(--med) var(--spring); }
 .avatar { flex: none; width: 38px; height: 38px; border-radius: 50%; position: relative; overflow: hidden; display: grid; place-items: center; font-weight: 700; font-size: 0.85rem; background: var(--primary-soft); color: var(--primary); }
+.avatar-edit { border: 0; padding: 0; cursor: pointer; font-family: inherit; }
+.avatar-edit:hover { box-shadow: 0 0 0 2px var(--primary); }
+.avatar-edit:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 
 /* Phones and small tablets: the sidebar becomes a drawer opened from the top bar. */
@@ -788,7 +791,7 @@ input[type='checkbox'], input[type='radio'] { accent-color: var(--text); }
   .mode-switch button[aria-checked='true'] { background: #fff; color: #0a0a0a; }
   .side-user { border: 0; padding: 0; color: #fff; }
   .side-user .avatar { background: #fff; color: #0a0a0a; width: 34px; height: 34px; }
-  .side-user > span:last-child { display: none; }
+  .side-user-name { display: none; }
 }
 @media (max-width: 1199px) {
   .topbar { background: #0a0a0a; color: #fff; border: 0; }
@@ -894,3 +897,29 @@ body { overflow-x: clip; }
 @media (max-width: 719px) { .tile-line { flex-direction: column; gap: 2px; } }
 .pv-facts dd.avail-low { align-self: center; }
 @media (max-width: 759px) { .pv-photo { aspect-ratio: 1 / 1; max-height: 42dvh; } }
+
+/* sign up: one card under the wordmark */
+.signup { display: flex; flex-direction: column; gap: 16px; width: 100%; }
+.signup h1 { font-size: 1.6rem; margin-bottom: 4px; }
+.signup .notice { margin-bottom: 0; }
+.signup input[readonly] { background: var(--surface-2); color: var(--muted); }
+.signup .field .small { font-weight: 400; }
+.signup .btn-primary { align-self: stretch; min-height: 48px; }
+
+/* log out: at the end of the signed-in person's row */
+.logout-btn { flex: none; margin-left: auto; width: 38px; height: 38px; color: var(--muted); background: transparent; border-color: transparent; }
+.logout-btn:hover:not(:disabled) { color: var(--text); background: var(--surface-2); }
+@media (min-width: 1200px) {
+  .side-user .logout-btn { margin-left: 2px; width: 34px; height: 34px; color: #fff; }
+  .side-user .logout-btn:hover:not(:disabled) { background: #1f1f1f; color: #fff; }
+}
+
+/* log in: the account that Microsoft signed in, and a way to switch */
+.login { display: flex; flex-direction: column; gap: 16px; width: 100%; }
+.login h1 { font-size: 1.6rem; margin-bottom: 4px; }
+.login-account { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--line); border-radius: var(--r-m); background: var(--surface-2); min-width: 0; }
+.login-account > span { display: flex; flex-direction: column; min-width: 0; }
+.login-account strong, .login-account .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.login .btn-primary { min-height: 48px; }
+.login-other { display: flex; flex-direction: column; gap: 6px; padding-top: 14px; border-top: 1px solid var(--line); }
+.login-other .btn { align-self: flex-start; text-decoration: none; }

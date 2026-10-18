@@ -62,3 +62,13 @@ export function validateClothing(f: ClothingInput, others: { sku: string; name: 
 
   return e
 }
+
+/** The name a new customer signs up with: what the Users row's Title stores. */
+export function validateName(raw: string): string | undefined {
+  const name = raw.trim()
+  if (!name) return 'Enter your name.'
+  if (name.length < 2) return 'Use at least 2 characters.'
+  if (name.length > 100) return 'Keep your name under 100 characters.'
+  if (!/^[\p{L}][\p{L}\p{M} .'-]*$/u.test(name)) return "Use letters, spaces, dots, apostrophes or dashes."
+  return undefined
+}

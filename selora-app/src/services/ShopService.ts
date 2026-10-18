@@ -48,6 +48,10 @@ export class ConfigurationError extends Error {
  */
 export interface ShopService {
   currentUser(): AppUser
+  /** Whether the signed-in person is in Users; also settles their role. */
+  checkAccount(): Promise<boolean>
+  /** Signs the signed-in person up as a Customer with this name. */
+  signUp(name: string): Promise<void>
   /** Something an <img> can show for a clothing PhotoUrl (library photos are loaded through the connector). */
   photoSrc(photoUrl: string): Promise<string>
 

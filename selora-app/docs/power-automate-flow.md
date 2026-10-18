@@ -171,3 +171,13 @@ Both were created through the Dataverse Web API into the solution and added to t
 **Before suppliers can use them:** add the `SupplierOffer` choice to ClothingCosts.RecordType, give suppliers Read on Clothes and
 Clothing Photos, share the app with them and give them the App Opener role.
 
+
+## Selora – Account (flow ID for the app `348505c0-36aa-7f7b-5142-310cf3ea1a65`)
+Power Apps (V2) trigger, inputs `text` = mode (`check` or `signup`) and `text_1` = name. SharePoint connection reference only.
+1. `Caller`: the signed-in person's email from the trigger headers.
+2. `Get_user`: Users where `UserAccount/EMail eq <caller>`, top 1.
+3. Row found: answer `{ ok: true, registered: true, role: <Role> }`.
+4. No row and mode is `signup`: create `{ Title: <name, max 100 chars; the email if blank>, UserAccount: <caller>, Role: Customer }`
+   and answer `{ ok: true, registered: true, role: Customer }`; if the create fails, `{ ok: false, error }`.
+5. No row and mode is `check`: answer `{ ok: true, registered: false }`.
+The app calls `check` on load (this also tells suppliers apart) and shows the sign up page when `registered` is false.

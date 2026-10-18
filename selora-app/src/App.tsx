@@ -14,6 +14,9 @@ import { DashboardPage } from './pages/DashboardPage'
 import { NotificationsPage } from './pages/NotificationsPage'
 import { OrdersPage } from './pages/OrdersPage'
 import { ShopPage } from './pages/ShopPage'
+import { LoginPage } from './pages/LoginPage'
+import { SignUpPage } from './pages/SignUpPage'
+import { isLoggedOut, setLoggedOut } from './session'
 import { SupplierPage, type SupplierSection } from './pages/SupplierPage'
 import type { ShopService } from './services/ShopService'
 import { transition } from './motion'
@@ -99,8 +102,10 @@ function AppearanceSwitch() {
 
 export default function App() {
   const [service, setService] = useState<ShopService>()
-  // Bumped when a Customer turns out to be a Supplier, so the shell restarts in the supplier area.
-  const [role, setRole] = useState<string>()
+  // People signed in with Microsoft but not yet in Users see the sign up page first.
+  const [needsSignUp, setNeedsSignUp] = useState(false)
+  // Logged out of Selora in this browser: the login page shows until they log in again.
+  const [out, setOut] = useState(false)
   const [error, setError] = useState<string>()
   useEffect(() => {
     void (async () => {
@@ -109,11 +114,15 @@ export default function App() {
         const gw = createGateway()
         const live = await LiveShopService.create(gw, ctx.user.fullName ?? '')
         initCart(live.currentUser().email)
-        setService(live)
-        // Suppliers can't read Users, so they load as Customers; the supplier flow tells them apart.
-        if (live.currentUser().role === 'Customer') {
-          void live.detectSupplier().then((yes) => yes && setRole('Supplier'))
+        setOut(isLoggedOut(live.currentUser().email))
+        // Also settles the role: suppliers can't read Users, so they load as Customers until the flow answers.
+        try {
+          setNeedsSignUp(!(await live.checkAccount()))
+        } catch (e) {
+          // Don't lock people out of the shop if the Account flow is down; they shop as Customers.
+          console.warn("[Selora] Couldn't check the account", e)
         }
+        setService(live)
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e))
       }
@@ -137,10 +146,31 @@ export default function App() {
       </main>
     )
   }
-  return <Shell service={service} key={role ?? 'loaded'} />
+  const user = service.currentUser()
+  const logInOut = (next: boolean) => {
+    setLoggedOut(user.email, next)
+    transition(() => setOut(next))
+  }
+  if (out) {
+    return (
+      <main className="center">
+        <Wordmark />
+        <LoginPage name={user.name} email={user.email} onLogin={() => logInOut(false)} />
+      </main>
+    )
+  }
+  if (needsSignUp) {
+    return (
+      <main className="center">
+        <Wordmark />
+        <SignUpPage service={service} onDone={() => transition(() => setNeedsSignUp(false))} />
+      </main>
+    )
+  }
+  return <Shell service={service} onLogout={() => logInOut(true)} />
 }
 
-function Shell({ service }: { service: ShopService }) {
+function Shell({ service, onLogout }: { service: ShopService; onLogout: () => void }) {
   const user = service.currentUser()
   const admin = user.role === 'Admin'
   const supplier = user.role === 'Supplier'
@@ -224,11 +254,14 @@ function Shell({ service }: { service: ShopService }) {
           {!supplier && <CartButton count={cartCount} onClick={() => setCartOpen(true)} />}
           <AppearanceSwitch />
           <div className="side-user">
-            <Avatar email={user.email} name={user.name} />
-            <span>
+            <Avatar email={user.email} name={user.name} editable />
+            <span className="side-user-name">
               <strong>{user.name}</strong>
               <span className="muted small">{user.role}</span>
             </span>
+            <button className="icon-btn logout-btn" onClick={onLogout} aria-label="Log out" title="Log out">
+              <Icon name="logout" />
+            </button>
           </div>
         </aside>
         {open && <div className="side-scrim" onClick={() => setDrawer(false)} />}

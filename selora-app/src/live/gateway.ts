@@ -46,6 +46,11 @@ export interface SharePointGateway {
   runSupplierRequests(): Promise<SupplierFlowResult & { requests?: string; offers?: string; accepted?: string }>
   /** Runs the Supplier Offer flow, which saves the caller's offer. */
   runSupplierOffer(input: { requestId: number; quantity: number; unitCost: number; arriveBy: string; note: string }): Promise<SupplierFlowResult>
+  /**
+   * Runs the Account flow for the signed-in person: "check" says whether they are in Users and with which role;
+   * "signup" also adds them as a Customer when they are not.
+   */
+  runAccount(mode: 'check' | 'signup', name?: string): Promise<SupplierFlowResult & { registered?: string; role?: string }>
 }
 
 /** What the supplier flows answer: ok is "true" or "false", with a reason when false. */
@@ -177,6 +182,11 @@ export function createGateway(): SharePointGateway {
     async runSupplierOffer(o) {
       const input = { number: o.requestId, number_1: o.quantity, number_2: o.unitCost, text: o.arriveBy, text_1: o.note }
       return unwrap(await gen.Selora_SupplierOfferService.Run(input), 'Sending the offer') ?? {}
+    },
+
+    async runAccount(mode, name) {
+      const label = mode === 'signup' ? 'Creating your account' : 'Checking your account'
+      return unwrap(await gen.Selora_AccountService.Run({ text: mode, text_1: name ?? '' }), label) ?? {}
     },
   }
 }

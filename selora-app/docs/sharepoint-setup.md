@@ -14,6 +14,9 @@ internal names must be confirmed against the generated Code Apps models. The `No
 Suppliers get the restock emails. Add `Supplier` to the choices; admins then add or remove suppliers on the app's
 **Suppliers** page (it writes these rows; removing sets Role back to Customer). Suppliers need no site access.
 A user with no row is a Customer; the app and flow handle that, SharePoint cannot.
+**Sign up:** someone signed in with Microsoft who has no row sees a *Create your account* page first. It runs the
+**Selora – Account** flow, which adds `{ Title: <name>, UserAccount: <caller>, Role: Customer }` for the caller only;
+it never creates Admin or Supplier rows. The same flow's `check` mode tells the app whether the caller has a row and their role.
 
 ### Clothes
 `Title` (name) · `SKU` (text, required, **unique**) · `Category` (Choice: T-Shirt, Shirt, Trousers, Dress, Shorts, Other) ·

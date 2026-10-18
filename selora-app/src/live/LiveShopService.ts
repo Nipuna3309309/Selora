@@ -1,4 +1,4 @@
-import { validateClothing } from '../domain/validation'
+import { validateClothing, validateName } from '../domain/validation'
 import { afterPurchase, ruleKey, rulesFrom, validateRule, type ProfitRule } from '../domain/pricing'
 import { nextSku } from '../domain/sku'
 import type {
@@ -149,29 +149,65 @@ export class LiveShopService implements ShopService {
   private gw: SharePointGateway
   private user: AppUser
 
-  private constructor(gw: SharePointGateway, user: AppUser) {
+  /** True once the signed-in person is known to have a Users row. */
+  private registered: boolean
+
+  private constructor(gw: SharePointGateway, user: AppUser, registered: boolean) {
     this.gw = gw
     this.user = user
+    this.registered = registered
   }
 
   /** Resolves the signed-in user and their role. Missing role means Customer. */
   static async create(gw: SharePointGateway, displayName: string): Promise<LiveShopService> {
     const email = (await gw.currentUserEmail()).toLowerCase()
     let role: Role = 'Customer'
+    let registered = false
     try {
       const rows = await gw.getItems(LISTS.users, {
         filter: `${COLS.users.userAccount}/EMail eq '${odata(email)}'`,
         top: 1,
       })
-      if (rows[0] && choice(rows[0][COLS.users.role]) === 'Admin') role = 'Admin'
+      if (rows[0]) {
+        registered = true
+        const r = choice(rows[0][COLS.users.role])
+        if (r === 'Admin' || r === 'Supplier') role = r
+      }
     } catch {
-      // Customers have no read access to Users; that correctly means Customer.
+      // Customers have no read access to Users; checkAccount asks the Account flow instead.
     }
-    return new LiveShopService(gw, { email, name: displayName || email, role })
+    return new LiveShopService(gw, { email, name: displayName || email, role }, registered)
   }
 
   currentUser(): AppUser {
     return this.user
+  }
+
+  private applyAccount(r: { registered?: string; role?: string }): void {
+    this.registered = r.registered === 'true'
+    if (r.role === 'Admin' || r.role === 'Supplier' || r.role === 'Customer') this.user = { ...this.user, role: r.role }
+  }
+
+  /**
+   * Whether the signed-in person has a Users row. Customers and suppliers can't read Users, so the
+   * Account flow answers for them, and its role tells suppliers apart from customers.
+   */
+  async checkAccount(): Promise<boolean> {
+    if (this.registered) return true
+    const r = await this.gw.runAccount('check')
+    if (r.ok !== 'true') throw new Error(r.error || "Your account couldn't be checked.")
+    this.applyAccount(r)
+    return this.registered
+  }
+
+  /** Adds the signed-in person to Users as a Customer, through the Account flow. */
+  async signUp(name: string): Promise<void> {
+    const problem = validateName(name)
+    if (problem) throw new Error(problem)
+    const r = await this.gw.runAccount('signup', name.trim())
+    if (r.ok !== 'true' || r.registered !== 'true') throw new Error(r.error || "Your account couldn't be created. Please try again.")
+    this.applyAccount(r)
+    this.user = { ...this.user, name: name.trim() }
   }
 
   private requireAdmin(): void {
@@ -225,22 +261,6 @@ export class LiveShopService implements ShopService {
   private startOrder(o: Order): Promise<void> {
     if (o.status !== 'Pending' || o.processingStage !== 'New') return Promise.resolve()
     return this.start(`order-${o.id}`, () => this.gw.runProcessOrder(o.id))
-  }
-
-  /**
-   * Customers can't read Users, so a supplier first loads as a Customer. This asks the Supplier
-   * Requests flow (which checks Users itself) and switches the role when the answer is yes.
-   */
-  async detectSupplier(): Promise<boolean> {
-    if (this.user.role === 'Admin') return false
-    try {
-      const r = await this.gw.runSupplierRequests()
-      if (r.ok !== 'true') return false
-    } catch {
-      return false
-    }
-    this.user = { ...this.user, role: 'Supplier' }
-    return true
   }
 
   async supplierView(): Promise<SupplierView> {
