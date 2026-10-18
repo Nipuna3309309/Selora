@@ -1,0 +1,138 @@
+{
+  "name": "Selora – Supplier Offer",
+  "id": "/providers/Microsoft.PowerApps/apis/shared_logicflows",
+  "type": "Microsoft.PowerApps/apis",
+  "properties": {
+    "displayName": "Selora – Supplier Offer",
+    "isCustom": false,
+    "swagger": {
+      "swagger": "2.0",
+      "info": {
+        "title": "Selora – Supplier Offer",
+        "version": "2015-02-01-preview"
+      },
+      "host": "asia-001.azure-apim.net",
+      "schemes": [
+        "https"
+      ],
+      "consumes": [
+        "application/json"
+      ],
+      "produces": [
+        "application/json"
+      ],
+      "paths": {
+        "/{connectionId}/triggers/manual/run": {
+          "post": {
+            "operationId": "Run",
+            "description": "Runs a logic flow trigger.",
+            "parameters": [
+              {
+                "name": "connectionId",
+                "in": "path",
+                "required": true,
+                "type": "string",
+                "x-ms-visibility": "internal"
+              },
+              {
+                "name": "input",
+                "description": "The trigger's input",
+                "in": "body",
+                "required": true,
+                "schema": {
+                  "$ref": "#/definitions/ManualTriggerInput"
+                }
+              },
+              {
+                "name": "api-version",
+                "description": "The api version",
+                "in": "query",
+                "required": true,
+                "default": "2015-02-01-preview",
+                "x-ms-visibility": "internal",
+                "type": "string"
+              }
+            ],
+            "responses": {
+              "200": {
+                "description": "Ok",
+                "schema": {
+                  "$ref": "#/definitions/ResponseActionOutput"
+                }
+              },
+              "default": {
+                "description": "The Flow Response.",
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      },
+      "definitions": {
+        "ManualTriggerInput": {
+          "type": "object",
+          "properties": {
+            "number": {
+              "title": "RequestId",
+              "type": "number",
+              "description": "ID of the RestockRequest row in Notifications",
+              "x-ms-dynamically-added": true,
+              "x-ms-content-hint": "NUMBER"
+            },
+            "number_1": {
+              "title": "Quantity",
+              "type": "number",
+              "description": "Pieces the supplier will send",
+              "x-ms-dynamically-added": true,
+              "x-ms-content-hint": "NUMBER"
+            },
+            "number_2": {
+              "title": "UnitCost",
+              "type": "number",
+              "description": "Price per piece in LKR",
+              "x-ms-dynamically-added": true,
+              "x-ms-content-hint": "NUMBER"
+            },
+            "text": {
+              "title": "ArriveBy",
+              "type": "string",
+              "description": "Expected delivery date, YYYY-MM-DD, or empty",
+              "x-ms-dynamically-added": true,
+              "x-ms-content-hint": "TEXT"
+            },
+            "text_1": {
+              "title": "Note",
+              "type": "string",
+              "description": "Optional note, up to 100 characters",
+              "x-ms-dynamically-added": true,
+              "x-ms-content-hint": "TEXT"
+            }
+          },
+          "required": [
+            "number",
+            "number_1",
+            "number_2"
+          ]
+        },
+        "ResponseActionOutput": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "title": "ok",
+              "x-ms-dynamically-added": true,
+              "type": "string"
+            },
+            "error": {
+              "title": "error",
+              "x-ms-dynamically-added": true,
+              "type": "string"
+            }
+          }
+        }
+      },
+      "basePath": "/apim/logicflows"
+    }
+  }
+}

@@ -62,7 +62,7 @@ function Delta({ now, before, upIsGood = true, points, range }: {
   )
 }
 
-function Tile({ label, children, delta, trend, i }: {
+export function Tile({ label, children, delta, trend, i }: {
   label: string
   children: ReactNode
   delta?: ReactNode
@@ -287,13 +287,34 @@ export function DashboardPage({ onGo }: { onGo: (s: AdminSection) => void }) {
         <Tile i={6} label="Stock value at cost" delta={<span className="delta delta-flat">Money tied up in stock today</span>}>
           {lkrShort(d.stockValue)}
         </Tile>
+        <Tile
+          i={7}
+          label="Profit on cost"
+          delta={<Delta now={now.markup} before={before.markup} points range={range} />}
+        >
+          {now.markup === null ? '–' : pct(now.markup)}
+        </Tile>
+        <Tile
+          i={8}
+          label="Spent on stock"
+          delta={<span className="delta delta-flat">Bought in the last {range} days</span>}
+        >
+          {lkrShort(now.spent)}
+        </Tile>
+        <Tile
+          i={9}
+          label="Profit waiting in stock"
+          delta={<span className="delta delta-flat">If today's stock sells at today's prices</span>}
+        >
+          {lkrShort(d.stockProfit)}
+        </Tile>
       </div>
 
       <div className="chart-grid">
         <ChartCard
           className="span-2"
-          title="Daily sales"
-          sub={`Confirmed sales per day, last ${range} days`}
+          title="Sales and profit"
+          sub={`Confirmed sales and gross profit per day, last ${range} days`}
           table={
             <table className="table">
               <thead>
@@ -321,8 +342,9 @@ export function DashboardPage({ onGo }: { onGo: (s: AdminSection) => void }) {
             <p className="muted chart-empty">No confirmed sales in this period.</p>
           ) : (
             <LineChart
-              label={`Daily sales over the last ${range} days`}
+              label={`Daily sales and gross profit over the last ${range} days`}
               points={d.days.map((x) => ({ x: x.date, y: x.revenue }))}
+              series={{ main: 'Sales', second: 'Gross profit', values: d.days.map((x) => x.profit) }}
               format={formatLkr}
               formatTick={(n) => compactNumber(n)}
               formatX={formatDay}
@@ -375,23 +397,27 @@ export function DashboardPage({ onGo }: { onGo: (s: AdminSection) => void }) {
         </ChartCard>
 
         <ChartCard
-          title="Sales by category"
-          sub="Where the money comes from"
+          title="Profit by category"
+          sub="Gross profit per clothing type, against its profit rule"
           table={
             <table className="table">
               <thead>
                 <tr>
                   <th scope="col">Category</th>
+                  <th scope="col">Gross profit</th>
                   <th scope="col">Sales</th>
-                  <th scope="col">Share</th>
+                  <th scope="col">Profit on cost</th>
+                  <th scope="col">Rule</th>
                 </tr>
               </thead>
               <tbody>
                 {d.categories.map((x) => (
                   <tr key={x.name}>
                     <td data-label="Category">{x.name}</td>
+                    <td data-label="Gross profit">{formatLkr(x.profit)}</td>
                     <td data-label="Sales">{formatLkr(x.revenue)}</td>
-                    <td data-label="Share">{now.revenue ? pct(x.revenue / now.revenue) : '–'}</td>
+                    <td data-label="Profit on cost">{x.markup === null ? '–' : pct(x.markup)}</td>
+                    <td data-label="Rule">{x.rule ?? 'Not set'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -404,8 +430,12 @@ export function DashboardPage({ onGo }: { onGo: (s: AdminSection) => void }) {
             rows={d.categories.map((x) => ({
               key: x.name,
               label: x.name,
-              value: x.revenue,
-              tip: [`${pct(x.revenue / now.revenue)} of sales`],
+              value: x.profit,
+              tip: [
+                `${formatLkr(x.revenue)} sales`,
+                `${x.markup === null ? '–' : pct(x.markup)} profit on cost`,
+                x.rule ? `Rule: ${x.rule}` : 'No profit rule set',
+              ],
             }))}
           />
         </ChartCard>

@@ -38,6 +38,20 @@ export interface SharePointGateway {
   uploadFile(library: string, name: string, base64: string): Promise<string>
   /** File content by site-relative path, in whatever form the host returns it. */
   readFile(path: string): Promise<unknown>
+  /** Starts the Process Order flow for one Orders row. Resolves once the run starts, not when it ends. */
+  runProcessOrder(orderId: string): Promise<void>
+  /** Starts the Restock Request flow for one RestockRequest row in Notifications. */
+  runRestockRequest(notificationId: string): Promise<void>
+  /** Runs the Supplier Requests flow: open requests and the caller's offers, as JSON text. */
+  runSupplierRequests(): Promise<SupplierFlowResult & { requests?: string; offers?: string; accepted?: string }>
+  /** Runs the Supplier Offer flow, which saves the caller's offer. */
+  runSupplierOffer(input: { requestId: number; quantity: number; unitCost: number; arriveBy: string; note: string }): Promise<SupplierFlowResult>
+}
+
+/** What the supplier flows answer: ok is "true" or "false", with a reason when false. */
+export interface SupplierFlowResult {
+  ok?: string
+  error?: string
 }
 
 interface OperationResult<T> {
@@ -146,6 +160,23 @@ export function createGateway(): SharePointGateway {
 
     async readFile(path) {
       return unwrap(await gen.SharePointService.GetFileContentByPath(SITE_URL, path, true, true), 'Loading the photo')
+    },
+
+    async runProcessOrder(orderId) {
+      unwrap(await gen.Selora_ProcessOrderService.Run({ number: Number(orderId) }), 'Starting order processing')
+    },
+
+    async runRestockRequest(notificationId) {
+      unwrap(await gen.Selora_RestockRequestService.Run({ number: Number(notificationId) }), 'Starting the restock email')
+    },
+
+    async runSupplierRequests() {
+      return unwrap(await gen.Selora_SupplierRequestsService.Run({}), 'Loading restock requests') ?? {}
+    },
+
+    async runSupplierOffer(o) {
+      const input = { number: o.requestId, number_1: o.quantity, number_2: o.unitCost, text: o.arriveBy, text_1: o.note }
+      return unwrap(await gen.Selora_SupplierOfferService.Run(input), 'Sending the offer') ?? {}
     },
   }
 }

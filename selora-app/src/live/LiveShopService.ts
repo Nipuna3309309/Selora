@@ -1,4 +1,5 @@
 import { validateClothing } from '../domain/validation'
+import { afterPurchase, ruleKey, rulesFrom, validateRule, type ProfitRule } from '../domain/pricing'
 import { nextSku } from '../domain/sku'
 import type {
   AppNotification,
@@ -9,12 +10,13 @@ import type {
   CheckoutInput,
   NewOrderInput,
   Order,
+  PurchaseInput,
   RestockRequest,
   Role,
-  SalesSummary,
   Supplier,
 } from '../domain/types'
-import { AccessDeniedError, computeSummary, type ShopService } from '../services/ShopService'
+import { AccessDeniedError, StockSavedError, type ShopService, type SupplierView } from '../services/ShopService'
+import { offerStatus, titleWithCounter, toOffer, validateCounter, validateOffer, type Counter, type OfferInput } from '../domain/supplier'
 import { COLS, LISTS, PHOTO_LIBRARY } from './columns'
 import { type SharePointGateway, type SpRow, UniqueViolationError } from './gateway'
 import { blobToBase64, contentToBlob, libraryPathOf, photoUrlFor } from './photos'
@@ -64,6 +66,8 @@ function toClothing(r: SpRow): Clothing {
     stock: num(r[c.stock]),
     lowStockThreshold: num(r[c.lowStockThreshold]),
     isActive: r[c.isActive] === true,
+    // Rows from before the AutoPrice column have no value; they count as Auto, the column's default.
+    autoPrice: r[c.autoPrice] !== false,
   }
 }
 
@@ -98,6 +102,8 @@ function toCost(r: SpRow): ClothingCost {
     unitCost: num(r[c.unitCost]),
     orderId: str(r[c.orderItemId]),
     quantity: num(r[c.quantity]),
+    title: str(r.Title),
+    createdAt: str(r.Created),
   }
 }
 
@@ -130,6 +136,7 @@ function toRestock(r: SpRow): RestockRequest {
     clothingId: str(r[c.orderItemId]),
     note: str(r[c.message]),
     emailStatus: (choice(r[c.emailStatus]) || 'Pending') as RestockRequest['emailStatus'],
+    closed: r[c.isRead] === true,
     createdAt: str(r.Created),
   }
 }
@@ -199,7 +206,132 @@ export class LiveShopService implements ShopService {
     return (await this.gw.getItems(LISTS.clothes, { orderBy: `${COLS.clothes.name} asc` })).map(toClothing)
   }
 
+  /** When each row's flow was last started this session, so a retry doesn't start it again too soon. */
+  private started = new Map<string, number>()
+
+  /**
+   * Starts a flow and records it. A failure is only logged: the row is saved either way, and
+   * retryStuck starts it again later.
+   */
+  private async start(key: string, run: () => Promise<void>): Promise<void> {
+    this.started.set(key, Date.now())
+    try {
+      await run()
+    } catch (e) {
+      console.warn(`[Selora] Couldn't start the flow for ${key}`, e)
+    }
+  }
+
+  private startOrder(o: Order): Promise<void> {
+    if (o.status !== 'Pending' || o.processingStage !== 'New') return Promise.resolve()
+    return this.start(`order-${o.id}`, () => this.gw.runProcessOrder(o.id))
+  }
+
+  /**
+   * Customers can't read Users, so a supplier first loads as a Customer. This asks the Supplier
+   * Requests flow (which checks Users itself) and switches the role when the answer is yes.
+   */
+  async detectSupplier(): Promise<boolean> {
+    if (this.user.role === 'Admin') return false
+    try {
+      const r = await this.gw.runSupplierRequests()
+      if (r.ok !== 'true') return false
+    } catch {
+      return false
+    }
+    this.user = { ...this.user, role: 'Supplier' }
+    return true
+  }
+
+  async supplierView(): Promise<SupplierView> {
+    const r = await this.gw.runSupplierRequests()
+    if (r.ok !== 'true') throw new AccessDeniedError(r.error || "You're not set up as a supplier.")
+    const parse = (s: string | undefined): unknown[] => {
+      try {
+        const v = JSON.parse(s || '[]')
+        return Array.isArray(v) ? v : []
+      } catch {
+        return []
+      }
+    }
+    type Row = Record<string, unknown>
+    const requests = (parse(r.requests) as Row[]).map((x) => ({
+      id: str(x.id),
+      clothingId: str(x.clothingId),
+      note: str(x.note),
+      createdAt: str(x.createdAt),
+    }))
+    const open = new Set(requests.map((x) => x.id))
+    const accepted = new Set(parse(r.accepted).map(str))
+    const offers = (parse(r.offers) as Row[])
+      .map((x) =>
+        toOffer({
+          id: str(x.id),
+          requestId: str(x.requestId),
+          clothingId: str(x.clothingId),
+          quantity: num(x.quantity),
+          unitCost: num(x.unitCost),
+          title: str(x.info),
+          createdAt: str(x.createdAt),
+        }),
+      )
+      .map((o) => ({ ...o, status: offerStatus(o, open, accepted) }))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    return { requests, offers }
+  }
+
+  async sendOffer(input: OfferInput): Promise<void> {
+    const problem = Object.values(validateOffer(input, new Date().toISOString().slice(0, 10)))[0]
+    if (problem) throw new Error(problem)
+    const r = await this.gw.runSupplierOffer({
+      requestId: Number(input.requestId),
+      quantity: input.quantity,
+      unitCost: input.unitCost,
+      arriveBy: input.arriveBy,
+      note: input.note.trim(),
+    })
+    if (r.ok !== 'true') throw new Error(r.error || "The offer wasn't saved.")
+  }
+
+  async counterOffer(offerId: string, counter: Counter): Promise<void> {
+    this.requireAdmin()
+    const problem = Object.values(validateCounter(counter))[0]
+    if (problem) throw new Error(problem)
+    const rows = await this.gw.getItems(LISTS.costs, { filter: `ID eq ${Number(offerId)}`, top: 1 })
+    const row = rows[0]
+    if (!row || choice(row[COLS.costs.recordType]) !== 'SupplierOffer') throw new Error('That offer is no longer there.')
+    const title = titleWithCounter(str(row.Title), { ...counter, note: counter.note.trim() })
+    if (title.length > 255) throw new Error('The note is too long to fit. Shorten it.')
+    await this.gw.updateItem(LISTS.costs, offerId, { Title: title })
+  }
+
+  async retryStuck(): Promise<void> {
+    // Suppliers have no orders and can't read them.
+    if (this.user.role === 'Supplier') return
+    const now = Date.now()
+    const due = (key: string, createdAt: string, waitMs: number, againMs: number) =>
+      now - new Date(createdAt).getTime() > waitMs && now - (this.started.get(key) ?? 0) > againMs
+    const orders = this.user.role === 'Admin' ? await this.listAllOrders() : await this.listMyOrders()
+    // Oldest first and only a few at a time: the flow handles one order at a time and queues a handful.
+    const stuck = orders
+      .filter((o) => o.status === 'Pending' && o.processingStage === 'New' && due(`order-${o.id}`, o.createdAt, 20_000, 60_000))
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      .slice(0, 3)
+    for (const o of stuck) await this.startOrder(o)
+    if (this.user.role !== 'Admin') return
+    const emails = (await this.listRestockRequests())
+      .filter((r) => r.emailStatus === 'Pending' && due(`restock-${r.id}`, r.createdAt, 30_000, 120_000))
+      .slice(0, 3)
+    for (const r of emails) await this.start(`restock-${r.id}`, () => this.gw.runRestockRequest(r.id))
+  }
+
   async placeOrder(input: NewOrderInput): Promise<Order> {
+    const order = await this.createOrder(input)
+    await this.startOrder(order)
+    return order
+  }
+
+  private async createOrder(input: NewOrderInput): Promise<Order> {
     const c = COLS.orders
     try {
       const row = await this.gw.createItem(LISTS.orders, {
@@ -278,6 +410,7 @@ export class LiveShopService implements ShopService {
       [c.stock]: input.stock,
       [c.lowStockThreshold]: input.lowStockThreshold,
       [c.isActive]: input.isActive,
+      [c.autoPrice]: input.autoPrice,
     }
     if (input.id) return toClothing(await this.gw.updateItem(LISTS.clothes, input.id, fields))
     if (!autoSku) return toClothing(await this.gw.createItem(LISTS.clothes, fields))
@@ -317,15 +450,84 @@ export class LiveShopService implements ShopService {
       })
   }
 
+  async saveProfitRule(rule: ProfitRule): Promise<void> {
+    this.requireAdmin()
+    const problem = Object.values(validateRule(rule))[0]
+    if (problem) throw new Error(problem)
+    const c = COLS.costs
+    const key = ruleKey(rule.category)
+    // Fixed amount in UnitCost, percent in Quantity, rounding in OrderItemId.
+    const fields = { [c.unitCost]: rule.fixed, [c.quantity]: rule.percent, [c.orderItemId]: rule.roundTo }
+    const rows = await this.gw.getItems(LISTS.costs, { filter: `${c.recordKey} eq '${odata(key)}'`, top: 1 })
+    if (rows[0]) await this.gw.updateItem(LISTS.costs, str(rows[0].ID), fields)
+    else
+      await this.gw.createItem(LISTS.costs, {
+        Title: `Profit rule: ${rule.category}`,
+        [c.recordKey]: key,
+        [c.recordType]: 'ProfitRule',
+        ...fields,
+      })
+  }
+
+  async addStock(clothingId: string, quantity: number, unitCost: number): Promise<Clothing> {
+    this.requireAdmin()
+    if (!Number.isInteger(quantity) || quantity <= 0) throw new Error('Quantity must be a whole number above 0.')
+    if (!(unitCost >= 0)) throw new Error('Cost must be zero or more.')
+    // Everything read fresh, so the average uses the stock left after any sales made meanwhile.
+    const rows = await this.gw.getItems(LISTS.clothes, { filter: `ID eq ${Number(clothingId)}`, top: 1 })
+    if (!rows[0]) throw new Error('This item no longer exists.')
+    const item = toClothing(rows[0])
+    const k = COLS.costs.recordKey
+    const keys = [`CURRENT-${clothingId}`, ruleKey(item.category)]
+    const costRows = (await this.gw.getItems(LISTS.costs, { filter: keys.map((x) => `${k} eq '${odata(x)}'`).join(' or ') })).map(toCost)
+    const current = costRows.find((r) => r.recordKey === keys[0])?.unitCost
+    const { cost, price } = afterPurchase(item, current, rulesFrom(costRows).get(item.category), quantity, unitCost)
+
+    const c = COLS.clothes
+    const saved = toClothing(
+      await this.gw.updateItem(LISTS.clothes, clothingId, { [c.stock]: item.stock + quantity, [c.price]: price }),
+    )
+    // The stock is in. From here a failure must not lead to a retry that adds it twice.
+    try {
+      await this.setCurrentCost(clothingId, cost).catch(() => this.setCurrentCost(clothingId, cost))
+    } catch (e) {
+      throw new StockSavedError(
+        `The stock was added, but the new cost (${cost}) wasn't saved: ${e instanceof Error ? e.message : String(e)}. Fix it from Edit.`,
+      )
+    }
+    return saved
+  }
+
+  async updatePrices(changes: { clothingId: string; price: number }[]): Promise<void> {
+    this.requireAdmin()
+    for (const ch of changes) {
+      if (!(ch.price > 0)) throw new Error('Price must be more than 0.')
+      await this.gw.updateItem(LISTS.clothes, ch.clothingId, { [COLS.clothes.price]: ch.price })
+    }
+  }
+
+  async recordPurchase(input: PurchaseInput): Promise<void> {
+    this.requireAdmin()
+    const c = COLS.costs
+    const key = `BUY-${input.purchaseId}`
+    try {
+      await this.gw.createItem(LISTS.costs, {
+        Title: key,
+        [c.recordKey]: key,
+        [c.recordType]: 'Purchase',
+        [c.clothing]: lookup(input.clothingId),
+        [c.unitCost]: input.unitCost,
+        [c.quantity]: input.quantity,
+      })
+    } catch (e) {
+      // Already logged by an earlier try.
+      if (!(e instanceof UniqueViolationError)) throw e
+    }
+  }
+
   async listAllOrders(): Promise<Order[]> {
     this.requireAdmin()
     return (await this.gw.getItems(LISTS.orders, { orderBy: 'Created desc' })).map(toOrder)
-  }
-
-  async getSalesSummary(): Promise<SalesSummary> {
-    this.requireAdmin()
-    const [orders, costs] = await Promise.all([this.listAllOrders(), this.listCosts()])
-    return computeSummary(orders, costs)
   }
 
   async requestRestock(clothingId: string, note: string): Promise<RestockRequest> {
@@ -342,7 +544,9 @@ export class LiveShopService implements ShopService {
       [c.message]: note,
       [c.emailStatus]: 'Pending',
     })
-    return toRestock(row)
+    const request = toRestock(row)
+    await this.start(`restock-${request.id}`, () => this.gw.runRestockRequest(request.id))
+    return request
   }
 
   async listRestockRequests(): Promise<RestockRequest[]> {
@@ -352,6 +556,11 @@ export class LiveShopService implements ShopService {
       orderBy: 'Created desc',
     })
     return rows.map(toRestock)
+  }
+
+  async closeRestockRequests(ids: string[]): Promise<void> {
+    this.requireAdmin()
+    for (const id of ids) await this.gw.updateItem(LISTS.notifications, id, { [COLS.notifications.isRead]: true })
   }
 
   async listSuppliers(): Promise<Supplier[]> {

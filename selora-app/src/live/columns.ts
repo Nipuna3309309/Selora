@@ -31,6 +31,7 @@ export const COLS = {
     stock: 'StockQuantity',
     lowStockThreshold: 'LowStockLevel',
     isActive: 'IsActive',
+    autoPrice: 'AutoPrice',
   },
   costs: {
     recordKey: 'RecordKey',

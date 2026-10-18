@@ -19,7 +19,9 @@ A user with no row is a Customer; the app and flow handle that, SharePoint canno
 `Title` (name) · `SKU` (text, required, **unique**) · `Category` (Choice: T-Shirt, Shirt, Trousers, Dress, Shorts, Other) ·
 `Size` (Choice: XS, S, M, L, XL, XXL, One Size) · `Colour` (text, required) · `PhotoUrl` (Hyperlink) ·
 `SellingPrice` (Currency LKR, min 0) · `StockQuantity` (Number 0 dp, min 0) · `LowStockLevel` (Number 0 dp, default 5) ·
-`IsActive` (Yes/No, default Yes).
+`IsActive` (Yes/No, default Yes) · `AutoPrice` (Yes/No, default Yes; added 2026-10-18).
+`AutoPrice` Yes means the selling price follows the category's profit rule at the item's current cost; the app rewrites
+it when stock is bought or the rule changes. No means a fixed price the app never changes. Empty counts as Yes.
 
 ### Clothing Photos (document library)
 Created by the owner. Admins upload photos from the Clothes form; the app resizes each to a JPEG (max 1600px),
@@ -28,9 +30,20 @@ by its display name `Clothing Photos` (`PHOTO_LIBRARY` in `src/live/columns.ts`)
 only changes the link; old files stay in the library and can be deleted by hand.
 
 ### ClothingCosts (admin only)
-`RecordType` (Choice: CurrentCost, SaleCost) · `Clothing` (Lookup Clothes > Title) · `OrderItemId` (Number 0 dp) ·
+`RecordType` (Choice: CurrentCost, SaleCost, **Purchase**, **ProfitRule**, **SupplierOffer**) · `Clothing` (Lookup Clothes > Title) · `OrderItemId` (Number 0 dp) ·
 `UnitCost` (Currency LKR, min 0) · `Quantity` (Number 0 dp) · `RecordKey` (text, required, **unique**).
 Keys: `CURRENT-<ClothesID>` (editable by admins) and `SALE-<OrderID>` (one per sale, written by the flow, never edited).
+The `CURRENT-` cost is the **average** cost per piece: each purchase sets it to
+(stock left × old cost + pieces bought × their cost) ÷ (stock left + pieces bought), or to the new cost when stock was 0.
+The app also writes two more kinds of row, so add the **Purchase** and **ProfitRule** choices to `RecordType`:
+- `BUY-<id>`: one per stock purchase from Buy stock or Add clothing. `Clothing`, `UnitCost` (cost per piece) and `Quantity` (pieces bought). The dashboard's "Spent on stock" adds these up.
+- `RULE-<Category>`: one per clothing type, from Profit rules. `UnitCost` = fixed LKR profit, `Quantity` = profit percent, `OrderItemId` = round up to (1, 10, 50 or 100).
+- `OFFER-<RestockRequestID>-S<SupplierUsersID>`: a supplier's offer, written only by the **Supplier Offer** flow (one per supplier
+  per request; sending again replaces it). `Clothing`, `Quantity` (pieces), `UnitCost` (price per piece), `OrderItemId` = the restock
+  request's Notifications ID, `Title` = JSON `{"s": email, "n": name, "d": "YYYY-MM-DD", "t": note}`. When the admin receives
+  stock from an offer the purchase is logged as `BUY-OFFER-<offer row ID>`, which shows the offer as Accepted to the supplier.
+
+The flow only reads `CURRENT-` rows, so these new rows don't change how orders are processed.
 
 ### Orders
 `Clothing` (Lookup Clothes > Title) · `Quantity` (Number 0 dp, min 1) · `SimulatedPayment` (Choice: Success, Failed) ·
@@ -67,6 +80,9 @@ for confirmation to change Users and ClothingCosts).
 | Users | Full Control | **none** (recommended; read-only would expose other people's emails and roles) |
 | Clothes | Edit | Read |
 | Clothing Photos (library) | Edit | Read (needed to see photos) |
+
+Suppliers (a `Selora Suppliers` group): **Read** on Clothes and Clothing Photos only. They get restock requests and save offers
+through the Supplier Requests / Supplier Offer flows, so they need no access to Notifications, ClothingCosts, Orders or Users.
 | ClothingCosts | Full Control | **none** |
 | Orders | Full Control | Selora Add Own |
 | Notifications | Full Control | none at list level (see below) |

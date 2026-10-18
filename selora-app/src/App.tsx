@@ -1,6 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { getContext } from '@microsoft/power-apps/app'
 import { setAppearance, useAppearance, type Appearance } from './appearance'
+import { Avatar } from './components/Avatar'
 import { CartSheet } from './components/CartSheet'
 import { Icon, type IconName } from './components/Icon'
 import { initCart, useCart } from './cart'
@@ -13,11 +14,12 @@ import { DashboardPage } from './pages/DashboardPage'
 import { NotificationsPage } from './pages/NotificationsPage'
 import { OrdersPage } from './pages/OrdersPage'
 import { ShopPage } from './pages/ShopPage'
+import { SupplierPage, type SupplierSection } from './pages/SupplierPage'
 import type { ShopService } from './services/ShopService'
 import { transition } from './motion'
 import { usePolled } from './usePolled'
 
-type Page = 'shop' | 'orders' | 'notifications' | 'dashboard' | AdminSection
+type Page = 'shop' | 'orders' | 'notifications' | 'dashboard' | AdminSection | `supplier-${SupplierSection}`
 
 const SHOP_LINKS: { page: Page; label: string; icon: IconName }[] = [
   { page: 'shop', label: 'Shop', icon: 'shirt' },
@@ -27,12 +29,17 @@ const SHOP_LINKS: { page: Page; label: string; icon: IconName }[] = [
 const ADMIN_LINKS: { page: Page; label: string; icon: IconName }[] = [
   { page: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
   { page: 'clothes', label: 'Clothes', icon: 'tag' },
-  { page: 'costs', label: 'Buying costs', icon: 'coins' },
+  { page: 'pricing', label: 'Profit rules', icon: 'percent' },
   { page: 'all-orders', label: 'All orders', icon: 'list' },
   { page: 'sales', label: 'Sales', icon: 'chart' },
   { page: 'suppliers', label: 'Suppliers', icon: 'truck' },
 ]
 const ADMIN_PAGES = new Set<Page>(ADMIN_LINKS.map((l) => l.page))
+const SUPPLIER_LINKS: { page: Page; label: string; icon: IconName }[] = [
+  { page: 'supplier-requests', label: 'Restock requests', icon: 'truck' },
+  { page: 'supplier-offers', label: 'My offers', icon: 'receipt' },
+]
+const SUPPLIER_PAGES = new Set<Page>(SUPPLIER_LINKS.map((l) => l.page))
 
 const narrowQuery = window.matchMedia('(max-width: 1199px)')
 /** True while the sidebar is a slide-in drawer rather than a fixed column. */
@@ -92,6 +99,8 @@ function AppearanceSwitch() {
 
 export default function App() {
   const [service, setService] = useState<ShopService>()
+  // Bumped when a Customer turns out to be a Supplier, so the shell restarts in the supplier area.
+  const [role, setRole] = useState<string>()
   const [error, setError] = useState<string>()
   useEffect(() => {
     void (async () => {
@@ -101,6 +110,10 @@ export default function App() {
         const live = await LiveShopService.create(gw, ctx.user.fullName ?? '')
         initCart(live.currentUser().email)
         setService(live)
+        // Suppliers can't read Users, so they load as Customers; the supplier flow tells them apart.
+        if (live.currentUser().role === 'Customer') {
+          void live.detectSupplier().then((yes) => yes && setRole('Supplier'))
+        }
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e))
       }
@@ -124,21 +137,31 @@ export default function App() {
       </main>
     )
   }
-  return <Shell service={service} />
+  return <Shell service={service} key={role ?? 'loaded'} />
 }
 
 function Shell({ service }: { service: ShopService }) {
   const user = service.currentUser()
   const admin = user.role === 'Admin'
+  const supplier = user.role === 'Supplier'
   const narrow = useNarrow()
-  const [page, setPage] = useState<Page>(admin ? 'dashboard' : 'shop')
+  const [page, setPage] = useState<Page>(admin ? 'dashboard' : supplier ? 'supplier-requests' : 'shop')
   const [drawer, setDrawer] = useState(false)
   const [cartOpen, setCartOpen] = useState(false)
   const cartCount = useCart().reduce((n, l) => n + l.quantity, 0)
+  // The flows only run when the app calls them; this picks up any call that was missed.
+  useEffect(() => {
+    const retry = () => void service.retryStuck().catch((e) => console.warn('[Selora] Retry check failed', e))
+    retry()
+    const id = setInterval(retry, 20_000)
+    return () => clearInterval(id)
+  }, [service])
   const [unreadTick, setUnreadTick] = useState(0)
-  const notes = usePolled(() => service.listMyNotifications(), [service, unreadTick], 4000)
+  const notes = usePolled(() => (supplier ? Promise.resolve([]) : service.listMyNotifications()), [service, unreadTick], supplier ? undefined : 4000)
   const unread = (notes.data ?? []).filter((n) => !n.isRead).length
-  const current = ADMIN_PAGES.has(page) && !admin ? 'shop' : page
+  const current: Page = supplier
+    ? SUPPLIER_PAGES.has(page) ? page : 'supplier-requests'
+    : (ADMIN_PAGES.has(page) && !admin) || SUPPLIER_PAGES.has(page) ? 'shop' : page
   const open = narrow && drawer
 
   const go = (p: Page) => {
@@ -169,13 +192,6 @@ function Shell({ service }: { service: ShopService }) {
     </li>
   )
 
-  const initials = user.name
-    .split(/\s+/)
-    .map((w) => w[0])
-    .join('')
-    .slice(0, 2)
-    .toUpperCase()
-
   return (
     <AppContext.Provider value={{ service }}>
       <div className="layout">
@@ -187,8 +203,17 @@ function Shell({ service }: { service: ShopService }) {
         >
           <Wordmark />
           <nav>
-            <p className="side-label">Shop</p>
-            <ul>{SHOP_LINKS.map((l) => link(l, l.page === 'notifications' ? unread : undefined))}</ul>
+            {supplier ? (
+              <>
+                <p className="side-label">Supplier</p>
+                <ul>{SUPPLIER_LINKS.map((l) => link(l))}</ul>
+              </>
+            ) : (
+              <>
+                <p className="side-label">Shop</p>
+                <ul>{SHOP_LINKS.map((l) => link(l, l.page === 'notifications' ? unread : undefined))}</ul>
+              </>
+            )}
             {admin && (
               <>
                 <p className="side-label">Manage</p>
@@ -196,10 +221,10 @@ function Shell({ service }: { service: ShopService }) {
               </>
             )}
           </nav>
-          <CartButton count={cartCount} onClick={() => setCartOpen(true)} />
+          {!supplier && <CartButton count={cartCount} onClick={() => setCartOpen(true)} />}
           <AppearanceSwitch />
           <div className="side-user">
-            <span className="avatar" aria-hidden="true">{initials}</span>
+            <Avatar email={user.email} name={user.name} />
             <span>
               <strong>{user.name}</strong>
               <span className="muted small">{user.role}</span>
@@ -221,7 +246,7 @@ function Shell({ service }: { service: ShopService }) {
               {unread > 0 && <span className="menu-dot" aria-hidden="true" />}
             </button>
             <Wordmark />
-            <CartButton count={cartCount} onClick={() => setCartOpen(true)} />
+            {!supplier && <CartButton count={cartCount} onClick={() => setCartOpen(true)} />}
           </header>
           <main className="page" key={current}>
             {current === 'shop' && <ShopPage />}
@@ -229,6 +254,7 @@ function Shell({ service }: { service: ShopService }) {
             {current === 'notifications' && <NotificationsPage onChanged={() => setUnreadTick((t) => t + 1)} />}
             {current === 'dashboard' && <DashboardPage onGo={go} />}
             {current !== 'dashboard' && ADMIN_PAGES.has(current) && <AdminPage section={current as AdminSection} />}
+            {SUPPLIER_PAGES.has(current) && <SupplierPage section={current.replace('supplier-', '') as SupplierSection} />}
           </main>
         </div>
       </div>

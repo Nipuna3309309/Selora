@@ -7,6 +7,7 @@ import { formatLkr } from '../domain/format'
 import { COLOURS, type Clothing } from '../domain/types'
 import { addToCart } from '../cart'
 import { useApp } from '../context'
+import { prefersReducedMotion } from '../motion'
 import { usePolled } from '../usePolled'
 
 export function ShopPage() {
@@ -25,17 +26,17 @@ export function ShopPage() {
       (category === 'All' || c.category === category) &&
       `${c.name} ${c.colour} ${c.size} ${c.category}`.toLowerCase().includes(search.trim().toLowerCase()),
   )
-  const heroPhoto = (data ?? []).find((c) => c.photoUrl)?.photoUrl
+  // Up to 6 different photos from items on sale, shown in turn behind the banner.
+  const heroPhotos = useMemo(
+    () => Array.from(new Set((data ?? []).filter((c) => c.isActive && c.photoUrl).map((c) => c.photoUrl))).slice(0, 6),
+    [data],
+  )
   const filtering = search.trim() !== '' || category !== 'All'
 
   return (
     <section aria-labelledby="shop-title">
-      <div className={`shop-hero${heroPhoto ? '' : ' shop-hero-plain'}`}>
-        {heroPhoto && (
-          <div className="shop-hero-photo" aria-hidden="true">
-            <Photo url={heroPhoto} alt="" />
-          </div>
-        )}
+      <div className={`shop-hero${heroPhotos.length ? '' : ' shop-hero-plain'}`}>
+        {heroPhotos.length > 0 && <HeroSlides urls={heroPhotos} />}
         <div>
           <h1>Made to move</h1>
           <p>Explore the collection</p>
@@ -177,5 +178,54 @@ function Tile({ item, index, onOpen }: { item: Clothing; index: number; onOpen: 
         {a.kind === 'low' && <p className="avail avail-low">{a.text}</p>}
       </div>
     </article>
+  )
+}
+
+const SLIDE_MS = 6000
+
+/** The banner's background photos, cross-fading every few seconds. Paused for reduced motion. */
+function HeroSlides({ urls }: { urls: string[] }) {
+  const [index, setIndex] = useState(0)
+  const [paused, setPaused] = useState(prefersReducedMotion)
+  const current = index % urls.length
+
+  useEffect(() => {
+    if (paused || urls.length < 2) return
+    const t = setInterval(() => setIndex((n) => (n + 1) % urls.length), SLIDE_MS)
+    return () => clearInterval(t)
+  }, [paused, urls.length])
+
+  return (
+    <>
+      <div className="shop-hero-photo" aria-hidden="true">
+        {urls.map((url, n) => (
+          <div key={url} className={`hero-slide${n === current ? ' is-active' : ''}`}>
+            <Photo url={url} alt="" />
+          </div>
+        ))}
+      </div>
+      {urls.length > 1 && (
+        <div className="hero-controls">
+          {urls.map((url, n) => (
+            <button
+              key={url}
+              type="button"
+              className="hero-dot"
+              aria-label={`Show photo ${n + 1} of ${urls.length}`}
+              aria-current={n === current ? 'true' : undefined}
+              onClick={() => setIndex(n)}
+            />
+          ))}
+          <button
+            type="button"
+            className="hero-pause"
+            aria-label={paused ? 'Play slideshow' : 'Pause slideshow'}
+            onClick={() => setPaused((p) => !p)}
+          >
+            <Icon name={paused ? 'play' : 'pause'} size={16} />
+          </button>
+        </div>
+      )}
+    </>
   )
 }

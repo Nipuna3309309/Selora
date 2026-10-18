@@ -1,4 +1,5 @@
 import { businessDate, round2, todayBusinessDate } from './format'
+import { describeRule, priceFromCost, rulesFrom } from './pricing'
 import type { Clothing, ClothingCost, Order } from './types'
 
 /**
@@ -9,7 +10,7 @@ import type { Clothing, ClothingCost, Order } from './types'
 
 export type RangeDays = 7 | 30 | 90
 export type Severity = 'critical' | 'warning' | 'info'
-export type AdminSection = 'clothes' | 'costs' | 'all-orders' | 'sales' | 'suppliers'
+export type AdminSection = 'clothes' | 'pricing' | 'all-orders' | 'sales' | 'suppliers'
 
 export interface Totals {
   revenue: number
@@ -17,12 +18,16 @@ export interface Totals {
   profit: number
   /** Gross margin 0..1, or null with no sales. */
   margin: number | null
+  /** Profit as a share of cost (what the profit rules set), or null with no recorded cost. */
+  markup: number | null
   confirmed: number
   units: number
   aov: number | null
   rejected: number
   /** Value of orders that were not placed, at today's prices. */
   lostValue: number
+  /** Money spent buying stock (Purchase rows). */
+  spent: number
 }
 
 export interface Day {
@@ -39,6 +44,16 @@ export interface ItemPerformance {
   profit: number
   units: number
   margin: number | null
+}
+
+export interface CategoryPerformance {
+  name: string
+  revenue: number
+  profit: number
+  /** Profit as a share of cost, or null with no recorded cost. */
+  markup: number | null
+  /** The category's profit rule, e.g. "40% + LKR 100", if one is set. */
+  rule?: string
 }
 
 export interface Outcome {
@@ -69,9 +84,11 @@ export interface Dashboard {
   before: Totals
   days: Day[]
   topItems: ItemPerformance[]
-  categories: { name: string; revenue: number }[]
+  categories: CategoryPerformance[]
   outcomes: Outcome[]
   stockValue: number
+  /** Profit still to make if today's stock sells at today's prices and costs. */
+  stockProfit: number
   decisions: Decision[]
 }
 
@@ -93,7 +110,12 @@ function rejectReason(o: Order): Reason {
   return 'other'
 }
 
-function totals(orders: Order[], snapshots: Map<string, ClothingCost>, priceOf: (id: string) => number): Totals {
+function totals(
+  orders: Order[],
+  purchases: ClothingCost[],
+  snapshots: Map<string, ClothingCost>,
+  priceOf: (id: string) => number,
+): Totals {
   let revenue = 0
   let cogs = 0
   let units = 0
@@ -117,11 +139,13 @@ function totals(orders: Order[], snapshots: Map<string, ClothingCost>, priceOf: 
     cogs: round2(cogs),
     profit: round2(revenue - cogs),
     margin: revenue > 0 ? (revenue - cogs) / revenue : null,
+    markup: cogs > 0 ? (revenue - cogs) / cogs : null,
     confirmed,
     units,
     aov: confirmed > 0 ? round2(revenue / confirmed) : null,
     rejected,
     lostValue: round2(lostValue),
+    spent: round2(purchases.reduce((s, p) => s + p.unitCost * p.quantity, 0)),
   }
 }
 
@@ -140,6 +164,11 @@ export function buildDashboard(
   const dateOf = new Map(orders.map((o) => [o.id, businessDate(o.createdAt)]))
   const inNow = orders.filter((o) => dateOf.get(o.id)! >= from && dateOf.get(o.id)! <= today)
   const inBefore = orders.filter((o) => dateOf.get(o.id)! >= prevFrom && dateOf.get(o.id)! < from)
+  const purchases = costs.filter((c) => c.costType === 'Purchase' && c.createdAt)
+  const boughtOn = (c: ClothingCost) => businessDate(c.createdAt)
+  const boughtNow = purchases.filter((c) => boughtOn(c) >= from && boughtOn(c) <= today)
+  const boughtBefore = purchases.filter((c) => boughtOn(c) >= prevFrom && boughtOn(c) < from)
+  const rules = rulesFrom(costs)
 
   const byId = new Map(clothes.map((c) => [c.id, c]))
   const priceOf = (id: string) => byId.get(id)?.price ?? 0
@@ -156,7 +185,7 @@ export function buildDashboard(
   }
   // Per item and per category
   const items = new Map<string, ItemPerformance>()
-  const cats = new Map<string, number>()
+  const cats = new Map<string, { revenue: number; profit: number; cost: number }>()
   const stockMisses = new Map<string, { orders: number; value: number }>()
   const costMisses = new Map<string, number>()
 
@@ -183,7 +212,12 @@ export function buildDashboard(
       it.units += o.quantity
       items.set(o.clothingId, it)
       const cat = byId.get(o.clothingId)?.category || 'Other'
-      cats.set(cat, (cats.get(cat) ?? 0) + o.total)
+      const k = cats.get(cat) ?? { revenue: 0, profit: 0, cost: 0 }
+      cats.set(cat, {
+        revenue: k.revenue + o.total,
+        profit: k.profit + o.total - cost,
+        cost: k.cost + cost,
+      })
     } else if (o.status === 'Rejected') {
       const reason = rejectReason(o)
       const value = o.quantity * priceOf(o.clothingId)
@@ -237,14 +271,16 @@ export function buildDashboard(
       id: 'cost',
       severity: 'critical',
       title: `Set the buying cost for ${noCost.length} ${noCost.length === 1 ? 'item' : 'items'}`,
-      detail: `${list(noCost.map((c) => c.name))} can't be sold until a cost is set: the flow rejects those orders.`,
+      detail: `${list(noCost.map((c) => c.name))} can't be sold until a cost is set: the flow rejects those orders. Add it with Buy stock or Edit.`,
       impact: lost,
       impactLabel: lost > 0 ? `${lkrShort(lost)} turned away` : undefined,
-      action: 'Set costs',
-      target: 'costs',
+      action: 'Open clothes',
+      target: 'clothes',
     })
   }
 
+  /** Auto items whose price no longer matches their rule. */
+  const stale: string[] = []
   for (const c of active) {
     const sold = items.get(c.id)?.units ?? 0
     const perDay = sold / range
@@ -281,8 +317,10 @@ export function buildDashboard(
       }
     }
 
+    const rule = rules.get(c.category)
     if (cost !== undefined && c.price > 0) {
       const margin = (c.price - cost) / c.price
+      const target = rule ? priceFromCost(cost, rule) : 0
       if (margin <= 0) {
         decisions.push({
           id: `loss-${c.id}`,
@@ -293,7 +331,20 @@ export function buildDashboard(
           action: 'Edit price',
           target: 'clothes',
         })
-      } else if (margin < THIN_MARGIN) {
+      } else if (rule && c.autoPrice && c.price !== target) {
+        stale.push(c.name)
+      } else if (rule && !c.autoPrice && c.price < target) {
+        decisions.push({
+          id: `rule-${c.id}`,
+          severity: 'warning',
+          title: `${c.name} has a fixed price below your ${c.category} profit`,
+          detail: `Cost ${lkrShort(cost)} with ${describeRule(rule)} profit gives ${lkrShort(target)}, but the fixed price is ${lkrShort(c.price)}. Edit it and switch it back to Auto price, or keep it as a sale price.`,
+          impact: sold * (target - c.price),
+          impactLabel: sold > 0 ? `${lkrShort(sold * (target - c.price))} less profit` : undefined,
+          action: 'Edit price',
+          target: 'clothes',
+        })
+      } else if (!rule && margin < THIN_MARGIN) {
         decisions.push({
           id: `thin-${c.id}`,
           severity: 'warning',
@@ -305,6 +356,18 @@ export function buildDashboard(
         })
       }
     }
+  }
+
+  if (stale.length > 0) {
+    decisions.push({
+      id: 'stale-prices',
+      severity: 'warning',
+      title: `Update ${stale.length} Auto ${stale.length === 1 ? 'price' : 'prices'}`,
+      detail: `${list(stale)} ${stale.length === 1 ? "doesn't" : "don't"} match the profit rule yet. Profit rules shows the new prices before you apply them.`,
+      impact: 0,
+      action: 'Review prices',
+      target: 'pricing',
+    })
   }
 
   const idle = active.filter((c) => c.stock > 0 && !items.has(c.id))
@@ -329,13 +392,22 @@ export function buildDashboard(
     range,
     from,
     to: today,
-    now: totals(inNow, snapshots, priceOf),
-    before: totals(inBefore, snapshots, priceOf),
+    now: totals(inNow, boughtNow, snapshots, priceOf),
+    before: totals(inBefore, boughtBefore, snapshots, priceOf),
     days: [...dayMap.values()].map((d) => ({ ...d, revenue: round2(d.revenue), profit: round2(d.profit) })),
     topItems: performance.sort((a, b) => b.profit - a.profit).slice(0, 6),
     categories: [...cats.entries()]
-      .map(([name, revenue]) => ({ name, revenue: round2(revenue) }))
-      .sort((a, b) => b.revenue - a.revenue),
+      .map(([name, k]) => {
+        const rule = rules.get(name)
+        return {
+          name,
+          revenue: round2(k.revenue),
+          profit: round2(k.profit),
+          markup: k.cost > 0 ? k.profit / k.cost : null,
+          rule: rule && describeRule(rule),
+        }
+      })
+      .sort((a, b) => b.profit - a.profit),
     outcomes: [
       { key: 'confirmed', label: 'Confirmed', count: outcome.confirmed },
       { key: 'stock', label: 'Not placed: no stock', count: outcome.stock },
@@ -344,6 +416,12 @@ export function buildDashboard(
       { key: 'open', label: 'Still processing', count: outcome.open },
     ],
     stockValue: round2(active.reduce((s, c) => s + Math.max(0, c.stock) * (currentCost.get(c.id) ?? 0), 0)),
+    stockProfit: round2(
+      active.reduce((s, c) => {
+        const cost = currentCost.get(c.id)
+        return cost === undefined ? s : s + Math.max(0, c.stock) * (c.price - cost)
+      }, 0),
+    ),
     decisions,
   }
 }
