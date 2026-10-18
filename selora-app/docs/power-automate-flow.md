@@ -1,8 +1,10 @@
 # The Power Automate flow (build it by hand)
 
 One flow: **Selora – Process Order**. It is the only thing that changes stock, prices, totals, statuses and
-cost records. Until it is built and turned on, orders placed in the app stay **Pending**.
-**The flow has not been built or run yet.**
+cost records. Until it is turned on, orders placed in the app stay **Pending**.
+**Status:** built in the Nipun demo solution and turned on (it polls Orders every minute). A multi-item cart checkout is stored as one
+Orders row per item (`RequestId` = `CHK-<id>:1`, `:2`, ...); the flow processes each row on its own, so one sold-out item
+is Rejected while the others are Confirmed.
 
 Create the flow **inside the Nipun demo solution** (`Nipundemo`) and use only its connection references:
 SharePoint = `sriq_sharedsharepointonline_0e890`. The connection behind it is owned by an account in `Selora Admins`.
@@ -36,7 +38,9 @@ If `length(body('OpenReviews')?['value'])` > 0, run **Reject** with
 | Check | True means OK | Message |
 |---|---|---|
 | Quantity | `and(greaterOrEquals(triggerOutputs()?['body/Quantity'],1), lessOrEquals(triggerOutputs()?['body/Quantity'],10))` | Quantity must be a whole number from 1 to 10. |
-| Payment | `equals(triggerOutputs()?['body/SimulatedPayment/Value'],'Success')` | Simulated payment failed. No stock was deducted. |
+| Payment | `or(equals(triggerOutputs()?['body/SimulatedPayment/Value'],'Success'),equals(triggerOutputs()?['body/SimulatedPayment/Value'],'Cash on delivery'))` | Payment was not successful. No stock was deducted. |
+
+The `Cash on delivery` value must exist as a choice on `Orders.SimulatedPayment` (Success = Pay now).
 | Item exists and active | `and(not(empty(body('GetCloth')?['value'])), equals(outputs('Cloth')?['IsActive'],true))` | This item is not available. |
 | Current cost exists | `not(empty(body('GetCost')?['value']))` | This item is temporarily unavailable. |
 | Stock | `greaterOrEquals(outputs('Cloth')?['StockQuantity'], triggerOutputs()?['body/Quantity'])` | `concat('Insufficient stock. Only ', string(outputs('Cloth')?['StockQuantity']), ' available.')` |

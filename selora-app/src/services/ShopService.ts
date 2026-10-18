@@ -1,6 +1,7 @@
 import type {
   AppNotification,
   AppUser,
+  CheckoutInput,
   Clothing,
   ClothingCost,
   ClothingInput,
@@ -30,17 +31,23 @@ export class ConfigurationError extends Error {
  */
 export interface ShopService {
   currentUser(): AppUser
+  /** Something an <img> can show for a clothing PhotoUrl (library photos are loaded through the connector). */
+  photoSrc(photoUrl: string): Promise<string>
 
   // Customer
   listClothes(): Promise<Clothing[]>
   /** Idempotent on requestId: resubmitting returns the existing order. */
   placeOrder(input: NewOrderInput): Promise<Order>
+  /** Places one order row per cart line, all sharing the checkout id. Safe to repeat after a partial failure. */
+  placeCheckout(input: CheckoutInput): Promise<Order[]>
   listMyOrders(): Promise<Order[]>
   listMyNotifications(): Promise<AppNotification[]>
   markNotificationRead(id: string): Promise<void>
 
   // Admin
   saveClothing(input: ClothingInput): Promise<Clothing>
+  /** Stores a photo in the photo library and returns the link to save in PhotoUrl. */
+  uploadPhoto(image: Blob, baseName: string): Promise<string>
   listCosts(): Promise<ClothingCost[]>
   setCurrentCost(clothingId: string, unitCost: number): Promise<void>
   listAllOrders(): Promise<Order[]>

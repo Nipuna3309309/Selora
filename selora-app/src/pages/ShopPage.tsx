@@ -1,13 +1,12 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { Icon } from '../components/Icon'
-import { Sheet } from '../components/Sheet'
+import { Photo } from '../components/Photo'
 import { Stepper } from '../components/Stepper'
 import { formatLkr } from '../domain/format'
-import type { Clothing, SimulatedPayment } from '../domain/types'
+import type { Clothing } from '../domain/types'
+import { addToCart, MAX_QTY } from '../cart'
 import { useApp } from '../context'
 import { usePolled } from '../usePolled'
-
-const MAX_QTY = 10
 
 type Availability = { kind: 'ok' | 'low' | 'out' | 'off'; text: string }
 
@@ -18,12 +17,11 @@ function availability(c: Clothing): Availability {
   return { kind: 'ok', text: `${c.stock} in stock` }
 }
 
-export function ShopPage({ onOrdered }: { onOrdered: () => void }) {
+export function ShopPage() {
   const { service } = useApp()
   const { data, error, loading, reload } = usePolled(() => service.listClothes(), [service], 15000)
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState('All')
-  const [checkout, setCheckout] = useState<{ item: Clothing; qty: number } | null>(null)
 
   const categories = useMemo(
     () => ['All', ...Array.from(new Set((data ?? []).map((c) => c.category).filter(Boolean))).sort()],
@@ -34,12 +32,28 @@ export function ShopPage({ onOrdered }: { onOrdered: () => void }) {
       (category === 'All' || c.category === category) &&
       `${c.name} ${c.colour} ${c.size} ${c.category}`.toLowerCase().includes(search.trim().toLowerCase()),
   )
+  const heroPhoto = (data ?? []).find((c) => c.photoUrl)?.photoUrl
   const filtering = search.trim() !== '' || category !== 'All'
 
   return (
     <section aria-labelledby="shop-title">
+      <div className={`shop-hero${heroPhoto ? '' : ' shop-hero-plain'}`}>
+        {heroPhoto && (
+          <div className="shop-hero-photo" aria-hidden="true">
+            <Photo url={heroPhoto} alt="" />
+          </div>
+        )}
+        <div>
+          <h1>Made to move</h1>
+          <p>Explore the collection</p>
+          <button className="btn" onClick={() => document.getElementById('shop-title')?.scrollIntoView({ behavior: 'smooth' })}>
+            Shop all
+          </button>
+        </div>
+      </div>
+
       <div className="page-head">
-        <h2 id="shop-title">Shop</h2>
+        <h2 id="shop-title">Shop the latest styles</h2>
         {data && (
           <p className="muted">
             {shown.length} {shown.length === 1 ? 'piece' : 'pieces'}
@@ -79,7 +93,7 @@ export function ShopPage({ onOrdered }: { onOrdered: () => void }) {
       {loading && (
         <div className="grid" aria-busy="true" aria-label="Loading clothing">
           {Array.from({ length: 6 }, (_, i) => (
-            <div key={i} className="tile tile-skel" aria-hidden="true" />
+            <div key={i} className="tile tile-skel" style={{ '--i': i } as CSSProperties} aria-hidden="true" />
           ))}
         </div>
       )}
@@ -102,39 +116,31 @@ export function ShopPage({ onOrdered }: { onOrdered: () => void }) {
       )}
 
       <div className="grid">
-        {shown.map((c) => (
-          <Tile key={c.id} item={c} onBuy={(qty) => setCheckout({ item: c, qty })} />
+        {shown.map((c, i) => (
+          <Tile key={c.id} item={c} index={i} />
         ))}
       </div>
 
-      {checkout && (
-        <CheckoutSheet
-          item={checkout.item}
-          qty={checkout.qty}
-          onClose={() => {
-            setCheckout(null)
-            void reload()
-          }}
-          onDone={() => {
-            setCheckout(null)
-            onOrdered()
-          }}
-        />
-      )}
     </section>
   )
 }
 
-function Tile({ item, onBuy }: { item: Clothing; onBuy: (qty: number) => void }) {
+function Tile({ item, index }: { item: Clothing; index: number }) {
   const [qty, setQty] = useState(1)
+  const [added, setAdded] = useState(false)
+  useEffect(() => {
+    if (!added) return
+    const t = setTimeout(() => setAdded(false), 1400)
+    return () => clearTimeout(t)
+  }, [added])
   const a = availability(item)
   const blocked = a.kind === 'out' || a.kind === 'off'
   const max = Math.max(1, Math.min(MAX_QTY, item.stock))
   return (
-    <article className={`tile${blocked ? ' tile-off' : ''}`}>
+    <article className={`tile${blocked ? ' tile-off' : ''}`} style={{ '--i': Math.min(index, 12) } as CSSProperties}>
       <div className="photo">
         {item.photoUrl ? (
-          <img src={item.photoUrl} alt={item.name} loading="lazy" />
+          <Photo url={item.photoUrl} alt={item.name} saveAs={item.name} />
         ) : (
           <div className="photo-empty">No photo</div>
         )}
@@ -156,8 +162,15 @@ function Tile({ item, onBuy }: { item: Clothing; onBuy: (qty: number) => void })
         <p className={`avail avail-${a.kind}`}>{blocked ? ' ' : a.text}</p>
         <div className="buy-row">
           <Stepper value={qty} max={max} onChange={setQty} label={`Quantity of ${item.name}`} disabled={blocked} />
-          <button className="btn btn-buy" disabled={blocked} onClick={() => onBuy(Math.min(qty, max))}>
-            {blocked ? a.text : 'Buy'}
+          <button
+            className="btn btn-buy"
+            disabled={blocked}
+            onClick={() => {
+              addToCart(item.id, Math.min(qty, max))
+              setAdded(true)
+            }}
+          >
+            {blocked ? a.text : added ? 'Added' : 'Add to cart'}
           </button>
         </div>
       </div>
@@ -165,79 +178,3 @@ function Tile({ item, onBuy }: { item: Clothing; onBuy: (qty: number) => void })
   )
 }
 
-function CheckoutSheet({
-  item,
-  qty,
-  onClose,
-  onDone,
-}: {
-  item: Clothing
-  qty: number
-  onClose: () => void
-  onDone: () => void
-}) {
-  const { service } = useApp()
-  // One RequestId per checkout: retries and double clicks reuse it, so they can't place a second order.
-  const [requestId] = useState(() => `REQ-${crypto.randomUUID()}`)
-  const [payment, setPayment] = useState<SimulatedPayment>('Success')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string>()
-
-  async function submit() {
-    if (busy) return
-    setBusy(true)
-    setError(undefined)
-    try {
-      await service.placeOrder({ requestId, clothingId: item.id, quantity: qty, simulatedPayment: payment })
-      onDone()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-      setBusy(false)
-    }
-  }
-
-  return (
-    <Sheet title="Test checkout" onClose={onClose} closeDisabled={busy}>
-      <p className="ticket">No real payment is taken. Choose the result you want to test.</p>
-
-      <div className="line-item">
-        {item.photoUrl && <img src={item.photoUrl} alt="" />}
-        <div>
-          <strong>{item.name}</strong>
-          <p className="muted">
-            {item.colour}, size {item.size}, quantity {qty}
-          </p>
-        </div>
-        <span className="price">{formatLkr(item.price * qty)}</span>
-      </div>
-      <p className="muted small">The price and stock are checked again when the order is processed.</p>
-
-      <fieldset className="choice" disabled={busy}>
-        <legend>Simulated payment result</legend>
-        <label className={payment === 'Success' ? 'on' : ''}>
-          <input type="radio" name="pay" checked={payment === 'Success'} onChange={() => setPayment('Success')} />
-          <span>Payment succeeds</span>
-        </label>
-        <label className={payment === 'Failed' ? 'on' : ''}>
-          <input type="radio" name="pay" checked={payment === 'Failed'} onChange={() => setPayment('Failed')} />
-          <span>Payment fails</span>
-        </label>
-      </fieldset>
-
-      {error && (
-        <p className="notice notice-bad" role="alert">
-          {error}
-        </p>
-      )}
-
-      <div className="sheet-actions">
-        <button className="btn" onClick={onClose} disabled={busy}>
-          Cancel
-        </button>
-        <button className="btn btn-primary" onClick={() => void submit()} disabled={busy}>
-          {busy ? 'Placing order…' : error ? 'Try again' : `Place test order, ${formatLkr(item.price * qty)}`}
-        </button>
-      </div>
-    </Sheet>
-  )
-}

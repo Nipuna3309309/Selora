@@ -1,12 +1,12 @@
 import { getContext } from '@microsoft/power-apps/app'
 import * as gen from '../generated'
-import type { ListName } from './columns'
+import { SITE_URL, type ListName } from './columns'
 
 /**
  * A SharePoint row as the gateway returns it. Shapes come from the generated models:
  *  - Choice columns arrive as `{ Value }`, lookups as `{ Id, Value }`, Person columns as `{ Email }`.
  *  - Created By is normalised to `CreatedByEmail`.
- * Writes use plain values: choices as strings, lookups as `<Column>#Id: number`.
+ * Writes use plain values: choices as strings, lookups as `{ Id }` objects (the `<Column>#Id` fields are read-only).
  */
 export type SpRow = Record<string, unknown> & {
   ID: number | string
@@ -34,6 +34,10 @@ export interface SharePointGateway {
   getItems(list: ListName, options?: GetItemsOptions): Promise<SpRow[]>
   createItem(list: ListName, fields: Record<string, unknown>): Promise<SpRow>
   updateItem(list: ListName, id: string, fields: Record<string, unknown>): Promise<SpRow>
+  /** Uploads to a document library (by display name) and returns the file's site-relative path. */
+  uploadFile(library: string, name: string, base64: string): Promise<string>
+  /** File content by site-relative path, in whatever form the host returns it. */
+  readFile(path: string): Promise<unknown>
 }
 
 interface OperationResult<T> {
@@ -81,6 +85,24 @@ export function createGateway(): SharePointGateway {
     Orders: gen.Orders_1Service as unknown as ListService,
     Notifications: gen.Notifications_1Service as unknown as ListService,
   }
+  const libraries = new Map<string, Promise<string>>()
+
+  /** A library's root folder path, looked up once by display name. */
+  function libraryPath(name: string): Promise<string> {
+    let found = libraries.get(name)
+    if (!found) {
+      found = gen.SharePointService.ListRootFolder(SITE_URL).then((r) => {
+        const folder = unwrap(r, 'Finding document libraries').find(
+          (f) => f.IsFolder !== false && (f.DisplayName === name || f.Name === name),
+        )
+        if (!folder?.Path) throw new Error(`The "${name}" document library was not found on the SharePoint site.`)
+        return folder.Path
+      })
+      found.catch(() => libraries.delete(name))
+      libraries.set(name, found)
+    }
+    return found
+  }
 
   return {
     async currentUserEmail() {
@@ -112,6 +134,18 @@ export function createGateway(): SharePointGateway {
 
     async updateItem(list, id, fields) {
       return normalise(unwrap(await services[list].update(id, fields), `Updating ${list}`))
+    },
+
+    async uploadFile(library, name, base64) {
+      const folder = await libraryPath(library)
+      // The SDK turns the base64 body into raw bytes because the connector marks it as binary.
+      const meta = unwrap(await gen.SharePointService.CreateFile(SITE_URL, folder, name, base64, true), 'Uploading the photo')
+      if (!meta.Path) throw new Error('SharePoint did not return the uploaded file path.')
+      return meta.Path
+    },
+
+    async readFile(path) {
+      return unwrap(await gen.SharePointService.GetFileContentByPath(SITE_URL, path, true, true), 'Loading the photo')
     },
   }
 }

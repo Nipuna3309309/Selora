@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react'
 import { formatDateTime } from '../domain/format'
 import type { AppNotification } from '../domain/types'
 import { useApp } from '../context'
@@ -44,10 +45,14 @@ export function NotificationsPage({ onChanged }: { onChanged: () => void }) {
         </div>
       )}
       <div className="slips">
-        {(data ?? []).map((n) => {
+        {(data ?? []).map((n, i) => {
           const k = KIND[n.type] ?? { label: n.type, tone: 'wait' as Tone }
           return (
-            <article key={n.id} className={`note tone-${k.tone}${n.isRead ? ' read' : ''}`}>
+            <article
+              key={n.id}
+              className={`note tone-${k.tone}${n.isRead ? ' read' : ''}`}
+              style={{ '--i': Math.min(i, 10) } as CSSProperties}
+            >
               <div>
                 <p className="note-kind">
                   {!n.isRead && <span className="dot" aria-hidden="true" />}

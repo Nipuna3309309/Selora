@@ -5,18 +5,28 @@ import type {
   Clothing,
   ClothingCost,
   ClothingInput,
+  CheckoutInput,
   NewOrderInput,
   Order,
   Role,
   SalesSummary,
 } from '../domain/types'
 import { AccessDeniedError, computeSummary, type ShopService } from '../services/ShopService'
-import { COLS, LISTS } from './columns'
+import { COLS, LISTS, PHOTO_LIBRARY } from './columns'
 import { type SharePointGateway, type SpRow, UniqueViolationError } from './gateway'
+import { blobToBase64, contentToBlob, libraryPathOf, photoUrlFor } from './photos'
 
 const str = (v: unknown): string => (v == null ? '' : String(v))
 const num = (v: unknown): number => (v == null || v === '' ? 0 : Number(v))
 const optNum = (v: unknown): number | null => (v == null || v === '' ? null : Number(v))
+/**
+ * Lookup columns are written as an object holding the target item's Id. The
+ * `<Column>#Id` fields in the generated schema are read-only and SharePoint rejects them.
+ */
+const lookup = (id: string) => ({
+  '@odata.type': '#Microsoft.Azure.Connectors.SharePoint.SPListExpandedReference',
+  Id: Number(id),
+})
 const odata = (s: string): string => s.replace(/'/g, "''")
 
 /** Choice columns can arrive as a string or `{ Value }`. */
@@ -135,6 +145,30 @@ export class LiveShopService implements ShopService {
     if (this.user.role !== 'Admin') throw new AccessDeniedError()
   }
 
+  /** Object URLs for library photos, kept for the session so the grid doesn't download a photo twice. */
+  private photos = new Map<string, Promise<string>>()
+
+  photoSrc(photoUrl: string): Promise<string> {
+    const path = libraryPathOf(photoUrl)
+    if (!path) return Promise.resolve(photoUrl)
+    let src = this.photos.get(photoUrl)
+    if (!src) {
+      src = this.gw.readFile(path).then((data) => URL.createObjectURL(contentToBlob(data)))
+      src.catch(() => this.photos.delete(photoUrl))
+      this.photos.set(photoUrl, src)
+    }
+    return src
+  }
+
+  async uploadPhoto(image: Blob, baseName: string): Promise<string> {
+    this.requireAdmin()
+    const safe = baseName.replace(/[^a-z0-9-]+/gi, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'clothing'
+    // A timestamp keeps names unique, so a new photo never overwrites one an old order still shows.
+    const name = `${safe}-${Date.now()}.jpg`
+    const path = await this.gw.uploadFile(PHOTO_LIBRARY, name, await blobToBase64(image))
+    return photoUrlFor(path)
+  }
+
   async listClothes(): Promise<Clothing[]> {
     return (await this.gw.getItems(LISTS.clothes, { orderBy: `${COLS.clothes.name} asc` })).map(toClothing)
   }
@@ -145,7 +179,7 @@ export class LiveShopService implements ShopService {
       const row = await this.gw.createItem(LISTS.orders, {
         Title: input.requestId, // built-in Title is required by default
         [c.requestId]: input.requestId,
-        [`${c.clothing}#Id`]: Number(input.clothingId),
+        [c.clothing]: lookup(input.clothingId),
         [c.quantity]: input.quantity,
         [c.simulatedPayment]: input.simulatedPayment,
         // Only these four request fields are sent. Price, total, status and stage are the flow's job
@@ -161,6 +195,23 @@ export class LiveShopService implements ShopService {
       if (!rows[0]) throw e
       return toOrder(rows[0])
     }
+  }
+
+  async placeCheckout(input: CheckoutInput): Promise<Order[]> {
+    if (input.lines.length === 0) throw new Error('The cart is empty.')
+    const placed: Order[] = []
+    // One at a time and in order: the flow handles orders one by one, so the lines are processed in cart order.
+    for (const [i, line] of input.lines.entries()) {
+      placed.push(
+        await this.placeOrder({
+          requestId: `${input.checkoutId}:${i + 1}`,
+          clothingId: line.clothingId,
+          quantity: line.quantity,
+          simulatedPayment: input.payment,
+        }),
+      )
+    }
+    return placed
   }
 
   async listMyOrders(): Promise<Order[]> {
@@ -224,7 +275,7 @@ export class LiveShopService implements ShopService {
         Title: key,
         [c.recordKey]: key,
         [c.recordType]: 'CurrentCost',
-        [`${c.clothing}#Id`]: Number(clothingId),
+        [c.clothing]: lookup(clothingId),
         [c.unitCost]: unitCost,
       })
   }

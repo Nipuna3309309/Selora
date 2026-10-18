@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { Icon } from './Icon'
 
 const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
@@ -6,7 +7,7 @@ const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select:not([di
 /**
  * Dialog that rises from the bottom on phones and sits centred on larger screens.
  * Escape and the backdrop close it, focus is kept inside, and focus returns to
- * the control that opened it.
+ * the control that opened it. It renders into <body>, so an animated ancestor can't trap it.
  */
 export function Sheet({
   title,
@@ -63,7 +64,7 @@ export function Sheet({
     }
   }, [])
 
-  return (
+  return createPortal(
     <div
       className="scrim"
       onMouseDown={(e) => {
@@ -79,6 +80,7 @@ export function Sheet({
         </header>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

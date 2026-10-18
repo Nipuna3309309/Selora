@@ -19,6 +19,12 @@ A user with no row is a Customer; the app and flow handle that, SharePoint canno
 `SellingPrice` (Currency LKR, min 0) · `StockQuantity` (Number 0 dp, min 0) · `LowStockLevel` (Number 0 dp, default 5) ·
 `IsActive` (Yes/No, default Yes).
 
+### Clothing Photos (document library)
+Created by the owner. Admins upload photos from the Clothes form; the app resizes each to a JPEG (max 1600px),
+stores it here as `<SKU>-<timestamp>.jpg` and saves its full address in `Clothes.PhotoUrl`. The app finds the library
+by its display name `Clothing Photos` (`PHOTO_LIBRARY` in `src/live/columns.ts`). Replacing or removing a photo
+only changes the link; old files stay in the library and can be deleted by hand.
+
 ### ClothingCosts (admin only)
 `RecordType` (Choice: CurrentCost, SaleCost) · `Clothing` (Lookup Clothes > Title) · `OrderItemId` (Number 0 dp) ·
 `UnitCost` (Currency LKR, min 0) · `Quantity` (Number 0 dp) · `RecordKey` (text, required, **unique**).
@@ -57,6 +63,7 @@ for confirmation to change Users and ClothingCosts).
 |---|---|---|
 | Users | Full Control | **none** (recommended; read-only would expose other people's emails and roles) |
 | Clothes | Edit | Read |
+| Clothing Photos (library) | Edit | Read (needed to see photos) |
 | ClothingCosts | Full Control | **none** |
 | Orders | Full Control | Selora Add Own |
 | Notifications | Full Control | none at list level (see below) |

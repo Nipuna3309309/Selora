@@ -3,6 +3,11 @@
  * ID, Title, Created and Created By are built in. Keep this file as the only place
  * these names appear in the app. They match the generated models in src/generated.
  */
+export const SITE_URL = 'https://netorgft6455485.sharepoint.com/sites/NipunaAutomateTesting'
+
+/** Document library for clothing photos, found by its display name so its web address doesn't matter. */
+export const PHOTO_LIBRARY = 'Clothing Photos'
+
 export const LISTS = {
   users: 'Users',
   clothes: 'Clothes',

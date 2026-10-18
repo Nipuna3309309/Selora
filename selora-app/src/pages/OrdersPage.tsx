@@ -1,18 +1,37 @@
 import type { CSSProperties } from 'react'
 import { formatDateTime, formatLkr } from '../domain/format'
+import { groupOrders, type GroupStatus, type OrderGroup } from '../domain/checkout'
 import type { Order } from '../domain/types'
 import { Icon } from '../components/Icon'
 import { useApp } from '../context'
 import { isTerminal } from '../services/ShopService'
 import { usePolled } from '../usePolled'
-import { STAGES, stageIndex, statusLabel } from './orderView'
+import { STAGES, stageIndex, type Tone } from './orderView'
 
-/** A seam of stitches that fills as the flow moves the order through its stages. */
-function Tracker({ order }: { order: Order }) {
-  const at = stageIndex(order.processingStage)
-  const live = order.status === 'Pending' || order.status === 'Processing'
-  const halted = order.status === 'NeedsReview'
-  const done = order.status === 'Confirmed'
+const GROUP_LABEL: Record<GroupStatus, { text: string; tone: Tone }> = {
+  Pending: { text: 'Waiting to be processed', tone: 'wait' },
+  Processing: { text: 'Processing', tone: 'wait' },
+  Confirmed: { text: 'Confirmed', tone: 'ok' },
+  Partial: { text: 'Partly confirmed', tone: 'warn' },
+  Rejected: { text: 'Not placed', tone: 'bad' },
+  NeedsReview: { text: 'Needs review', tone: 'warn' },
+}
+
+const LINE_LABEL: Record<Order['status'], { text: string; tone: Tone }> = {
+  Pending: { text: 'Waiting', tone: 'wait' },
+  Processing: { text: 'Processing', tone: 'wait' },
+  Confirmed: { text: 'Confirmed', tone: 'ok' },
+  Rejected: { text: 'Not placed', tone: 'bad' },
+  NeedsReview: { text: 'Needs review', tone: 'warn' },
+}
+
+/** A seam of stitches that fills as the flow moves the order's items through their stages. */
+function Tracker({ group }: { group: OrderGroup }) {
+  const open = group.lines.filter((l) => l.status !== 'Rejected')
+  const at = open.length === 0 ? 0 : Math.min(...open.map((l) => stageIndex(l.processingStage)))
+  const live = group.status === 'Pending' || group.status === 'Processing'
+  const halted = group.status === 'NeedsReview'
+  const done = group.status === 'Confirmed' || group.status === 'Partial'
   const progress = done ? 1 : at / (STAGES.length - 1)
   return (
     <ol
@@ -34,41 +53,53 @@ function Tracker({ order }: { order: Order }) {
 }
 
 export function OrderList({ orders, showCustomer }: { orders: Order[]; showCustomer?: boolean }) {
-  if (orders.length === 0) {
+  const groups = groupOrders(orders)
+  if (groups.length === 0) {
     return (
       <div className="empty">
-        <p>No orders yet. When you buy something, it shows up here and you can watch it being processed.</p>
+        <p>No orders yet. When you place an order, it shows up here and you can watch it being processed.</p>
       </div>
     )
   }
   return (
     <div className="slips">
-      {orders.map((o) => {
-        const s = statusLabel(o)
-        const rejected = o.status === 'Rejected'
+      {groups.map((g, i) => {
+        const s = GROUP_LABEL[g.status]
+        const rejected = g.status === 'Rejected'
+        const notes = g.lines.filter((l) => l.resultMessage && (l.status === 'Rejected' || l.status === 'NeedsReview'))
         return (
-          <article key={o.id} className={`slip tone-${s.tone}`}>
+          <article key={g.id} className={`slip tone-${s.tone}`} style={{ '--i': Math.min(i, 10) } as CSSProperties}>
             <div className="slip-top">
               <div>
-                <h3>
-                  {o.clothingName || 'Clothing item'} <span className="muted">× {o.quantity}</span>
-                </h3>
+                <h3>Order {g.code}</h3>
                 <p className="muted small">
-                  Order {o.id}, {formatDateTime(o.createdAt)}
-                  {showCustomer && `, ${o.createdByEmail}`}
+                  {formatDateTime(g.createdAt)}
+                  {showCustomer && `, ${g.createdByEmail}`}
+                  {g.lines[0].simulatedPayment === 'Cash on delivery' ? ', cash on delivery' : g.lines[0].simulatedPayment === 'Success' ? ', paid' : ''}
                 </p>
               </div>
               <div className="slip-side">
                 <span className={`chip tone-${s.tone}`}>{s.text}</span>
-                {!rejected && <span className="price">{o.total > 0 ? formatLkr(o.total) : 'Total to be set'}</span>}
+                {!rejected && <span className="price">{g.total !== null ? formatLkr(g.total) : 'Total to be set'}</span>}
               </div>
             </div>
-            {!rejected && <Tracker order={o} />}
-            {o.resultMessage && (
-              <p className={`result${rejected || o.status === 'NeedsReview' ? ' result-attn' : ''}`}>
-                {o.resultMessage}
+            <ul className="slip-lines">
+              {g.lines.map((l) => (
+                <li key={l.id}>
+                  <span>
+                    {l.clothingName || 'Clothing item'} <span className="muted">× {l.quantity}</span>
+                  </span>
+                  {g.lines.length > 1 && <span className={`chip tone-${LINE_LABEL[l.status].tone}`}>{LINE_LABEL[l.status].text}</span>}
+                </li>
+              ))}
+            </ul>
+            {!rejected && <Tracker group={g} />}
+            {notes.map((l) => (
+              <p key={l.id} className="result result-attn">
+                {g.lines.length > 1 ? `${l.clothingName}: ` : ''}
+                {l.resultMessage}
               </p>
-            )}
+            ))}
           </article>
         )
       })}

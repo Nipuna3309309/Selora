@@ -1,30 +1,44 @@
-import { useState } from 'react'
+import { useEffect, useState, type ChangeEvent, type CSSProperties } from 'react'
+import { CountUp } from '../components/CountUp'
+import { Icon } from '../components/Icon'
+import { Photo } from '../components/Photo'
 import { Sheet } from '../components/Sheet'
+import type { AdminSection } from '../domain/dashboard'
 import { formatLkr } from '../domain/format'
-import { CATEGORIES, SIZES, type Clothing, type ClothingInput } from '../domain/types'
+import { CATEGORIES, COLOURS, SIZES, type Clothing, type ClothingInput } from '../domain/types'
 import { useApp } from '../context'
+import { prepareImage } from '../photoFile'
 import { usePolled } from '../usePolled'
 import { OrderList } from './OrdersPage'
 
-type Tab = 'clothes' | 'costs' | 'orders' | 'sales'
-const TABS: { id: Tab; label: string }[] = [
-  { id: 'clothes', label: 'Clothes' },
-  { id: 'costs', label: 'Buying costs' },
-  { id: 'orders', label: 'All orders' },
-  { id: 'sales', label: 'Sales' },
-]
+const ADMIN_TITLES: Record<AdminSection, string> = {
+  clothes: 'Clothes',
+  costs: 'Buying costs',
+  'all-orders': 'All orders',
+  sales: 'Sales',
+}
 
-export function AdminPage() {
+/** One admin section, chosen in the sidebar. */
+export function AdminPage({ section }: { section: AdminSection }) {
   const { service } = useApp()
-  const [tab, setTab] = useState<Tab>('clothes')
   const orders = usePolled(() => service.listAllOrders(), [service], 3000)
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 5000)
+    return () => clearInterval(t)
+  }, [])
   const inFlight = (orders.data ?? []).filter((o) => o.status === 'Pending' || o.status === 'Processing').length
+  // Stock is only held while the flow is actually working. A Pending order that has sat for
+  // over two minutes means the flow isn't running, so it must not lock stock forever.
+  const working = (orders.data ?? []).filter(
+    (o) => o.status === 'Processing' || (o.status === 'Pending' && now - new Date(o.createdAt).getTime() < 120_000),
+  ).length
   const review = (orders.data ?? []).filter((o) => o.status === 'NeedsReview')
 
   return (
     <section aria-labelledby="admin-title">
       <div className="page-head">
-        <h2 id="admin-title">Admin</h2>
+        <h2 id="admin-title">{ADMIN_TITLES[section]}</h2>
       </div>
       {review.length > 0 && (
         <p className="notice notice-warn" role="alert">
@@ -32,29 +46,28 @@ export function AdminPage() {
           New orders are rejected until {review.length === 1 ? 'it is' : 'they are'} resolved. See docs/recovery.md.
         </p>
       )}
-      {inFlight > 0 && (
+      {working > 0 && (
         <p className="notice">
-          {inFlight} {inFlight === 1 ? 'order is' : 'orders are'} being processed. Stock can't be edited until
-          {inFlight === 1 ? ' it finishes' : ' they finish'}.
+          {working} {working === 1 ? 'order is' : 'orders are'} being processed. Stock can't be edited until
+          {working === 1 ? ' it finishes' : ' they finish'}.
         </p>
       )}
-      <div className="segmented" role="tablist" aria-label="Admin sections">
-        {TABS.map((t) => (
-          <button key={t.id} role="tab" aria-selected={tab === t.id} onClick={() => setTab(t.id)}>
-            {t.label}
-          </button>
-        ))}
-      </div>
-      <div role="tabpanel">
-        {tab === 'clothes' && <ClothesTab stockLocked={inFlight > 0} />}
-        {tab === 'costs' && <CostsTab />}
-        {tab === 'orders' && (
+      {inFlight > working && (
+        <p className="notice notice-warn">
+          {inFlight - working} {inFlight - working === 1 ? 'order has' : 'orders have'} been Pending for over 2 minutes, so the
+          Power Automate flow doesn't seem to be running.
+        </p>
+      )}
+      <div className="section-body">
+        {section === 'clothes' && <ClothesTab stockLocked={working > 0} />}
+        {section === 'costs' && <CostsTab />}
+        {section === 'all-orders' && (
           <>
             {orders.error && <p className="notice notice-bad" role="alert">{orders.error}</p>}
             <OrderList orders={orders.data ?? []} showCustomer />
           </>
         )}
-        {tab === 'sales' && <SalesTab refreshKey={(orders.data ?? []).map((o) => o.status).join()} />}
+        {section === 'sales' && <SalesTab refreshKey={(orders.data ?? []).map((o) => o.status).join()} />}
       </div>
     </section>
   )
@@ -101,7 +114,7 @@ function ClothesTab({ stockLocked }: { stockLocked: boolean }) {
             <tr key={c.id}>
               <td data-label="Item">
                 <div className="cell-item">
-                  {c.photoUrl ? <img src={c.photoUrl} alt="" /> : <span className="thumb-empty" />}
+                  <span className="thumb">{c.photoUrl ? <Photo url={c.photoUrl} alt="" /> : null}</span>
                   <div>
                     <strong>{c.name}</strong>
                     <p className="muted small">{c.sku}</p>
@@ -164,9 +177,33 @@ function ClothingForm({
   const { service } = useApp()
   const [f, setF] = useState(initial)
   const [error, setError] = useState<string>()
-  const [busy, setBusy] = useState(false)
+  const [busy, setBusy] = useState<'upload' | 'save' | null>(null)
+  // A picked photo waits here until Save, so cancelling never leaves a stray file in the library.
+  const [pending, setPending] = useState<{ image: Blob; preview: string } | null>(null)
+  const [preparing, setPreparing] = useState(false)
   const set = <K extends keyof ClothingInput>(k: K, v: ClothingInput[K]) => setF((p) => ({ ...p, [k]: v }))
-  const text = (k: 'name' | 'sku' | 'photoUrl' | 'colour', label: string, wide?: boolean) => (
+
+  useEffect(() => () => {
+    if (pending) URL.revokeObjectURL(pending.preview)
+  }, [pending])
+
+  async function pick(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setError(undefined)
+    setPreparing(true)
+    try {
+      const image = await prepareImage(file)
+      setPending({ image, preview: URL.createObjectURL(image) })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setPreparing(false)
+    }
+  }
+
+  const text = (k: 'name' | 'sku', label: string, wide?: boolean) => (
     <label className={wide ? 'field wide' : 'field'}>
       <span>{label}</span>
       <input value={f[k]} onChange={(e) => set(k, e.target.value)} />
@@ -183,25 +220,94 @@ function ClothingForm({
     </label>
   )
   async function save() {
-    setBusy(true)
     setError(undefined)
+    let input = f
     try {
-      await service.saveClothing(f)
+      if (pending) {
+        setBusy('upload')
+        const photoUrl = await service.uploadPhoto(pending.image, f.sku || f.name)
+        input = { ...f, photoUrl }
+        // Keep the uploaded link, so retrying after a failed save doesn't upload the photo again.
+        setF(input)
+        setPending(null)
+      }
+      setBusy('save')
+      await service.saveClothing(input)
       onSaved()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
-      setBusy(false)
+      setBusy(null)
     }
   }
   return (
-    <Sheet title={f.id ? 'Edit clothing' : 'Add clothing'} onClose={onCancel} closeDisabled={busy}>
+    <Sheet title={f.id ? 'Edit clothing' : 'Add clothing'} onClose={onCancel} closeDisabled={!!busy}>
       <div className="form-grid">
         {text('name', 'Name', true)}
         {text('sku', 'SKU (must be unique)', true)}
         {choice('category', 'Category', CATEGORIES)}
         {choice('size', 'Size', SIZES)}
-        {text('colour', 'Colour')}
-        {text('photoUrl', 'Photo link', true)}
+        <div className="field wide">
+          <span>Colour{f.colour ? `: ${f.colour}` : ''}</span>
+          <div className="palette" role="radiogroup" aria-label="Colour">
+            {COLOURS.map((c) => (
+              <button
+                key={c.name}
+                type="button"
+                role="radio"
+                aria-checked={f.colour === c.name}
+                aria-label={c.name}
+                title={c.name}
+                className="swatch"
+                style={{ '--sw': c.hex } as CSSProperties}
+                onClick={() => set('colour', c.name)}
+              />
+            ))}
+          </div>
+          <input
+            placeholder="Or type another colour"
+            value={COLOURS.some((c) => c.name === f.colour) ? '' : f.colour}
+            onChange={(e) => set('colour', e.target.value)}
+          />
+        </div>
+        <div className="field wide">
+          <span>Photo</span>
+          <div className="photo-picker">
+            <div className="picker-preview">
+              {pending ? (
+                <img src={pending.preview} alt="New photo, not saved yet" />
+              ) : f.photoUrl ? (
+                <Photo url={f.photoUrl} alt="Current photo" saveAs={f.name || 'photo'} />
+              ) : (
+                <span className="picker-empty">
+                  <Icon name="image" size={28} />
+                </span>
+              )}
+            </div>
+            <div className="picker-actions">
+              <label className={`btn btn-file${busy || preparing ? ' is-disabled' : ''}`}>
+                <input type="file" accept="image/*" className="sr-only" disabled={!!busy || preparing} onChange={(e) => void pick(e)} />
+                <Icon name="image" size={18} />
+                {preparing ? 'Preparing…' : pending || f.photoUrl ? 'Replace photo' : 'Upload photo'}
+              </label>
+              {(pending || f.photoUrl) && (
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  disabled={!!busy}
+                  onClick={() => {
+                    setPending(null)
+                    set('photoUrl', '')
+                  }}
+                >
+                  Remove photo
+                </button>
+              )}
+              <p className="muted small">
+                {pending ? 'Saved to Clothing Photos when you press Save.' : 'JPG, PNG or WebP. Large photos are resized.'}
+              </p>
+            </div>
+          </div>
+        </div>
         <label className="field">
           <span>Price (LKR)</span>
           <input type="number" min={0} value={f.price} onChange={(e) => set('price', Number(e.target.value))} />
@@ -235,11 +341,11 @@ function ClothingForm({
       {stockLocked && <p className="muted small">Stock is locked while orders are being processed.</p>}
       {error && <p className="notice notice-bad" role="alert">{error}</p>}
       <div className="sheet-actions">
-        <button className="btn" onClick={onCancel} disabled={busy}>
+        <button className="btn" onClick={onCancel} disabled={!!busy}>
           Cancel
         </button>
-        <button className="btn btn-primary" onClick={() => void save()} disabled={busy}>
-          {busy ? 'Saving…' : 'Save changes'}
+        <button className="btn btn-primary" onClick={() => void save()} disabled={!!busy || preparing}>
+          {busy === 'upload' ? 'Uploading photo…' : busy === 'save' ? 'Saving…' : 'Save changes'}
         </button>
       </div>
     </Sheet>
@@ -335,15 +441,15 @@ function SalesTab({ refreshKey }: { refreshKey: string }) {
       <dl className="ledger">
         <div>
           <dt>Confirmed sales</dt>
-          <dd>{formatLkr(data.confirmedRevenue)}</dd>
+          <dd><CountUp value={data.confirmedRevenue} format={formatLkr} /></dd>
         </div>
         <div className="less">
           <dt>Cost of goods sold</dt>
-          <dd>{formatLkr(data.costOfGoodsSold)}</dd>
+          <dd><CountUp value={data.costOfGoodsSold} format={formatLkr} /></dd>
         </div>
         <div className="total">
           <dt>Gross profit</dt>
-          <dd>{formatLkr(data.grossProfit)}</dd>
+          <dd><CountUp value={data.grossProfit} format={formatLkr} /></dd>
         </div>
       </dl>
       <p className="muted">

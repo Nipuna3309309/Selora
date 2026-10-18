@@ -9,6 +9,7 @@ export * as ClothingCosts_1Model from './models/ClothingCosts_1Model';
 export * as CommonModels from './models/CommonModels';
 export * as Notifications_1Model from './models/Notifications_1Model';
 export * as Orders_1Model from './models/Orders_1Model';
+export * as SharePointModel from './models/SharePointModel';
 export * as Users_1Model from './models/Users_1Model';
 
 // Services
@@ -16,4 +17,5 @@ export * from './services/Clothes_1Service';
 export * from './services/ClothingCosts_1Service';
 export * from './services/Notifications_1Service';
 export * from './services/Orders_1Service';
+export * from './services/SharePointService';
 export * from './services/Users_1Service';
