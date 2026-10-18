@@ -11,6 +11,7 @@ const KIND: Record<AppNotification['type'], { label: string; tone: Tone }> = {
   LowStock: { label: 'Low stock', tone: 'warn' },
   OutOfStock: { label: 'Out of stock', tone: 'bad' },
   NeedsReview: { label: 'Needs review', tone: 'warn' },
+  RestockRequest: { label: 'Restock request', tone: 'warn' },
 }
 
 export function NotificationsPage({ onChanged }: { onChanged: () => void }) {

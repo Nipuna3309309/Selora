@@ -2,22 +2,39 @@
 
 One flow: **Selora – Process Order**. It is the only thing that changes stock, prices, totals, statuses and
 cost records. Until it is turned on, orders placed in the app stay **Pending**.
-**Status:** built in the Nipun demo solution and turned on (it polls Orders every minute). A multi-item cart checkout is stored as one
+**Status:** built in the Nipun demo solution and turned on. Since 2026-10-18 the app calls it (Power Apps trigger) right after
+it saves each order, so orders are confirmed in seconds instead of on the next one-minute poll. A multi-item cart checkout is stored as one
 Orders row per item (`RequestId` = `CHK-<id>:1`, `:2`, ...); the flow processes each row on its own, so one sold-out item
 is Rejected while the others are Confirmed.
 
 Create the flow **inside the Nipun demo solution** (`Nipundemo`) and use only its connection references:
 SharePoint = `sriq_sharedsharepointonline_0e890`. The connection behind it is owned by an account in `Selora Admins`.
 Office 365 Outlook = a new connection reference you add to Nipun demo (see "Email configuration").
-Below, `T` means the trigger's dynamic content and "Cloth" the clothing row re-read in step 5.
+Below, `T` means the order row read fresh in `Get_order` (`body('Get_order')`), and "Cloth" the clothing row re-read in step 5.
 
 ## 1. Trigger
-**SharePoint – When an item is created** (site above, list `Orders`).
+**Power Apps – When Power Apps calls a flow (V2)** with one Number input, `OrderId` (key `number`).
 Trigger settings (…) > **Concurrency control = On, Degree of parallelism = 1.** This serialises runs so two buyers cannot both pass
 the stock check. (It cannot be turned off again once enabled.)
+First action: SharePoint *Get item*, list `Orders`, ID `triggerBody()?['number']` -> `Get_order`. Every later step reads the order
+from `Get_order`, never from the app, so calling the flow with an ID can't change prices, stock or who placed the order.
+
+How the app calls it (`src/live/LiveShopService.ts`): after creating each Orders row it runs the flow with that row's ID.
+If the call fails (app closed, network, flow queue full), the order stays Pending; every open copy of the app checks every
+20 seconds and starts the flow again for orders still Pending/New after 20 seconds (customers for their own, admins for all).
+The idempotency guard below makes a second call for the same order do nothing.
+
+**Users need a Dataverse role to run the flow from the app**: give customers and admins the **App Opener** security role
+(or Basic User) in the Development environment. Without it a customer's call fails, and the order waits until an admin
+has the app open.
+
+The flow is added to the app with `npx pa app add flow --flow-id e3d9b084-33f0-43ec-a166-a55717d0bfd8` (writes
+`.power/schemas/logicflows/`, `src/generated/*/Selora_ProcessOrder*` and the `power.config.json` entry). Run it again after
+changing the trigger's inputs.
 
 ## 2. Idempotency guard
 Condition: `T Status Value` equals `Pending` **and** `T ProcessingStage Value` equals `New`. If not, *Terminate* (Succeeded).
+Because `T` is read fresh inside the one-at-a-time run, a second call for an order that is already processed stops here.
 
 ## 3. Identity and admins
 - *Compose* `CustomerEmail` = `toLower(triggerOutputs()?['body/Author/Email'])`. Always use Created By; never a request field.
@@ -108,3 +125,49 @@ Before building the flow, add the Outlook connection reference **inside Nipun de
 
 In the flow, every "Send an email (V2)" action uses that connection reference, sent as the connection owner (or a shared
 mailbox if available). Emails contain only order numbers and item names.
+
+## Restock Request flow
+Flow **Selora – Restock Request** (ID `780f33aa-a6ca-f111-a05c-002248ee059c`) in the Nipun demo solution. Connection
+references: SharePoint `sriq_sharedsharepointonline_0e890`, Office 365 Outlook `sriq_sharedoffice365_54600`.
+
+- **Start:** admins press **Request restock** (Clothes table, for low or sold-out items, and on the dashboard's restock
+  decisions). The app adds a Notifications row: `NotificationType = RestockRequest`, `OrderItemId` = the clothing ID,
+  `Message` = optional note (the dashboard adds the suggested quantity), `EmailStatus = Pending`,
+  `NotificationKey = RESTOCK-<clothingId>-<timestamp>`.
+- **Trigger:** since 2026-10-18, **When Power Apps calls a flow (V2)** with one Number input, `NotificationId`. The app calls
+  it right after it creates the row; `Get_request` reads the row, and `Is_pending_request` stops unless it is a
+  `RestockRequest` whose `EmailStatus` is still `Pending`, so the email goes out once. Admin copies of the app start it again
+  for rows still Pending after 30 seconds. Added to the app with
+  `npx pa app add flow --flow-id 3167206b-f50e-2b3f-d1c5-27f409cebbdd`.
+- **Flow:** acts only on that one row. It reads the Users list for rows
+  with `Role = Supplier` and emails all of them (not the admins) with the item, SKU, size, colour, stock, low-stock
+  level, note and who asked. It then sets `EmailStatus` to `Sent`, or `Failed` if the email fails, the item is not
+  found, or no Supplier is set up.
+- **App:** shows "Sent to suppliers", then "Asked suppliers <time>, email sent" for 24 hours, with **Ask again**.
+  Open requests from the last 30 days also appear under **Deliveries due** on the Clothes page. **Received** adds the
+  stock at the current cost, with the price from the profit rule, logs the purchase and sets `IsRead = true` on every open
+  request for that item. **Not coming** only sets `IsRead`. The flow only runs when the app calls it for a Pending row,
+  so these updates never send another email.
+- **Before use:** add the `RestockRequest` choice to `Notifications.NotificationType`, add the `Supplier` choice to
+  `Users.Role` and a Users row for each supplier, then turn the flow on.
+
+## Supplier flows
+Two flows in the Nipun demo solution give suppliers their area in the app without any list permissions. Both use
+**When Power Apps calls a flow (V2)** and the SharePoint connection reference `sriq_sharedsharepointonline_0e890`, and identify
+the caller from the `x-ms-user-email` header Power Apps adds (or its base64 `-encoded` form). Only a Users row with
+`Role = Supplier` for that email gets an answer; anyone else gets `ok = false`. Both answer with **Respond to a PowerApp or flow**.
+
+### Selora – Supplier Requests (flow ID for the app `fe1e9bed-aa6b-7ccf-2d63-312e69323300`)
+No inputs. Returns text fields `ok`, `error`, and JSON arrays `requests` (open RestockRequest rows from the last 30 days: id,
+clothingId, note, createdAt), `offers` (the caller's SupplierOffer rows) and `accepted` (all `BUY-OFFER-` keys). The app also
+calls it once at start for anyone who isn't an Admin: a yes switches the app to the supplier area.
+
+### Selora – Supplier Offer (flow ID for the app `703a8fd0-be89-4086-090f-55ec3ba2dfbd`)
+Inputs `RequestId`, `Quantity`, `UnitCost` (numbers, required), `ArriveBy` (YYYY-MM-DD or empty) and `Note` (up to 100 characters).
+Checks the caller is a Supplier, the request is an open RestockRequest, quantity 1–100,000 and price 0–1,000,000, then creates or
+updates the `OFFER-<RequestId>-S<SupplierUsersID>` row in ClothingCosts. Returns `ok` and `error`.
+
+Both were created through the Dataverse Web API into the solution and added to the app with `npx pa app add flow --flow-id <id>`.
+**Before suppliers can use them:** add the `SupplierOffer` choice to ClothingCosts.RecordType, give suppliers Read on Clothes and
+Clothing Photos, share the app with them and give them the App Opener role.
+

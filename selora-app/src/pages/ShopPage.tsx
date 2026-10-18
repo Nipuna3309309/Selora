@@ -1,27 +1,21 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { Icon } from '../components/Icon'
 import { Photo } from '../components/Photo'
-import { Stepper } from '../components/Stepper'
+import { ProductSheet } from '../components/ProductSheet'
+import { availability } from '../domain/availability'
 import { formatLkr } from '../domain/format'
-import type { Clothing } from '../domain/types'
-import { addToCart, MAX_QTY } from '../cart'
+import { COLOURS, type Clothing } from '../domain/types'
+import { addToCart } from '../cart'
 import { useApp } from '../context'
+import { prefersReducedMotion } from '../motion'
 import { usePolled } from '../usePolled'
-
-type Availability = { kind: 'ok' | 'low' | 'out' | 'off'; text: string }
-
-function availability(c: Clothing): Availability {
-  if (!c.isActive) return { kind: 'off', text: 'Not available' }
-  if (c.stock <= 0) return { kind: 'out', text: 'Sold out' }
-  if (c.stock <= c.lowStockThreshold) return { kind: 'low', text: `Only ${c.stock} left` }
-  return { kind: 'ok', text: `${c.stock} in stock` }
-}
 
 export function ShopPage() {
   const { service } = useApp()
   const { data, error, loading, reload } = usePolled(() => service.listClothes(), [service], 15000)
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState('All')
+  const [openId, setOpenId] = useState<string>()
 
   const categories = useMemo(
     () => ['All', ...Array.from(new Set((data ?? []).map((c) => c.category).filter(Boolean))).sort()],
@@ -32,17 +26,17 @@ export function ShopPage() {
       (category === 'All' || c.category === category) &&
       `${c.name} ${c.colour} ${c.size} ${c.category}`.toLowerCase().includes(search.trim().toLowerCase()),
   )
-  const heroPhoto = (data ?? []).find((c) => c.photoUrl)?.photoUrl
+  // Up to 6 different photos from items on sale, shown in turn behind the banner.
+  const heroPhotos = useMemo(
+    () => Array.from(new Set((data ?? []).filter((c) => c.isActive && c.photoUrl).map((c) => c.photoUrl))).slice(0, 6),
+    [data],
+  )
   const filtering = search.trim() !== '' || category !== 'All'
 
   return (
     <section aria-labelledby="shop-title">
-      <div className={`shop-hero${heroPhoto ? '' : ' shop-hero-plain'}`}>
-        {heroPhoto && (
-          <div className="shop-hero-photo" aria-hidden="true">
-            <Photo url={heroPhoto} alt="" />
-          </div>
-        )}
+      <div className={`shop-hero${heroPhotos.length ? '' : ' shop-hero-plain'}`}>
+        {heroPhotos.length > 0 && <HeroSlides urls={heroPhotos} />}
         <div>
           <h1>Made to move</h1>
           <p>Explore the collection</p>
@@ -117,16 +111,18 @@ export function ShopPage() {
 
       <div className="grid">
         {shown.map((c, i) => (
-          <Tile key={c.id} item={c} index={i} />
+          <Tile key={c.id} item={c} index={i} onOpen={() => setOpenId(c.id)} />
         ))}
       </div>
 
+      {openId && shown.some((c) => c.id === openId) && (
+        <ProductSheet items={shown} id={openId} onChange={setOpenId} onClose={() => setOpenId(undefined)} />
+      )}
     </section>
   )
 }
 
-function Tile({ item, index }: { item: Clothing; index: number }) {
-  const [qty, setQty] = useState(1)
+function Tile({ item, index, onOpen }: { item: Clothing; index: number; onOpen: () => void }) {
   const [added, setAdded] = useState(false)
   useEffect(() => {
     if (!added) return
@@ -135,7 +131,7 @@ function Tile({ item, index }: { item: Clothing; index: number }) {
   }, [added])
   const a = availability(item)
   const blocked = a.kind === 'out' || a.kind === 'off'
-  const max = Math.max(1, Math.min(MAX_QTY, item.stock))
+  const swatch = COLOURS.find((c) => c.name.toLowerCase() === item.colour.trim().toLowerCase())
   return (
     <article className={`tile${blocked ? ' tile-off' : ''}`} style={{ '--i': Math.min(index, 12) } as CSSProperties}>
       <div className="photo">
@@ -144,37 +140,92 @@ function Tile({ item, index }: { item: Clothing; index: number }) {
         ) : (
           <div className="photo-empty">No photo</div>
         )}
+        <button className="photo-open" onClick={onOpen} aria-label={`View ${item.name}`} />
         {item.size && (
           <span className="size-tag" aria-label={`Size ${item.size}`}>
             {item.size}
           </span>
         )}
-        {blocked && <span className="sold-band">{a.text}</span>}
-      </div>
-      <div className="tile-info">
-        <h3>{item.name}</h3>
-        <p className="muted">
-          {item.colour}
-          {item.category ? `, ${item.category}` : ''}
-        </p>
-        <p className="price">{formatLkr(item.price)}</p>
-        {/* Sold-out state already shows on the photo and the button, so this line stays an empty spacer to keep rows aligned. */}
-        <p className={`avail avail-${a.kind}`}>{blocked ? ' ' : a.text}</p>
-        <div className="buy-row">
-          <Stepper value={qty} max={max} onChange={setQty} label={`Quantity of ${item.name}`} disabled={blocked} />
+        {blocked ? (
+          <span className="sold-band">{a.text}</span>
+        ) : (
           <button
-            className="btn btn-buy"
-            disabled={blocked}
+            className={`quick-add${added ? ' is-added' : ''}`}
             onClick={() => {
-              addToCart(item.id, Math.min(qty, max))
+              addToCart(item.id, 1)
               setAdded(true)
             }}
           >
-            {blocked ? a.text : added ? 'Added' : 'Add to cart'}
+            <Icon name={added ? 'check' : 'plus'} size={16} />
+            {added ? 'Added' : 'Quick add'}
           </button>
+        )}
+      </div>
+      <div className="tile-info">
+        <div className="tile-line">
+          <h3>
+            <button className="name-link" onClick={onOpen}>
+              {item.name}
+            </button>
+          </h3>
+          <p className="price">{formatLkr(item.price)}</p>
         </div>
+        <p className="muted tile-sub">
+          {swatch && <span className="dot" style={{ '--sw': swatch.hex } as CSSProperties} aria-hidden="true" />}
+          {item.colour}
+          {item.category ? `, ${item.category}` : ''}
+        </p>
+        {a.kind === 'low' && <p className="avail avail-low">{a.text}</p>}
       </div>
     </article>
   )
 }
 
+const SLIDE_MS = 6000
+
+/** The banner's background photos, cross-fading every few seconds. Paused for reduced motion. */
+function HeroSlides({ urls }: { urls: string[] }) {
+  const [index, setIndex] = useState(0)
+  const [paused, setPaused] = useState(prefersReducedMotion)
+  const current = index % urls.length
+
+  useEffect(() => {
+    if (paused || urls.length < 2) return
+    const t = setInterval(() => setIndex((n) => (n + 1) % urls.length), SLIDE_MS)
+    return () => clearInterval(t)
+  }, [paused, urls.length])
+
+  return (
+    <>
+      <div className="shop-hero-photo" aria-hidden="true">
+        {urls.map((url, n) => (
+          <div key={url} className={`hero-slide${n === current ? ' is-active' : ''}`}>
+            <Photo url={url} alt="" />
+          </div>
+        ))}
+      </div>
+      {urls.length > 1 && (
+        <div className="hero-controls">
+          {urls.map((url, n) => (
+            <button
+              key={url}
+              type="button"
+              className="hero-dot"
+              aria-label={`Show photo ${n + 1} of ${urls.length}`}
+              aria-current={n === current ? 'true' : undefined}
+              onClick={() => setIndex(n)}
+            />
+          ))}
+          <button
+            type="button"
+            className="hero-pause"
+            aria-label={paused ? 'Play slideshow' : 'Pause slideshow'}
+            onClick={() => setPaused((p) => !p)}
+          >
+            <Icon name={paused ? 'play' : 'pause'} size={16} />
+          </button>
+        </div>
+      )}
+    </>
+  )
+}

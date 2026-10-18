@@ -1,4 +1,5 @@
-export type Role = 'Customer' | 'Admin'
+/** From Users.Role. Suppliers see only the supplier area; anyone without a row is a Customer. */
+export type Role = 'Customer' | 'Admin' | 'Supplier'
 
 export interface AppUser {
   email: string
@@ -41,10 +42,16 @@ export interface Clothing {
   stock: number
   lowStockThreshold: number
   isActive: boolean
+  /** True: the price follows the category's profit rule. False: the admin fixed it. */
+  autoPrice: boolean
 }
 
-/** RecordKey is CURRENT-<clothingId> or SALE-<orderId>. */
-export type CostType = 'CurrentCost' | 'SaleCost'
+/**
+ * RecordKey is CURRENT-<clothingId>, SALE-<orderId>, BUY-<purchaseId>, RULE-<category> or
+ * OFFER-<requestId>-S<supplierUserId>. Purchase, ProfitRule and SupplierOffer must exist as choices
+ * on ClothingCosts.RecordType.
+ */
+export type CostType = 'CurrentCost' | 'SaleCost' | 'Purchase' | 'ProfitRule' | 'SupplierOffer'
 
 export interface ClothingCost {
   id: string
@@ -52,9 +59,21 @@ export interface ClothingCost {
   clothingId: string
   costType: CostType
   unitCost: number
-  /** Order ID for SaleCost rows. */
+  /** Order ID for SaleCost rows; the rounding step on ProfitRule rows. */
   orderId: string
   quantity: number
+  /** Title: the supplier, date and note (JSON) on SupplierOffer rows. */
+  title: string
+  createdAt: string
+}
+
+/** One stock purchase: how many pieces the admin bought and what each cost. */
+export interface PurchaseInput {
+  /** One per purchase form, so a retry cannot log the purchase twice. */
+  purchaseId: string
+  clothingId: string
+  quantity: number
+  unitCost: number
 }
 
 /** 'Success' is Pay now. 'Cash on delivery' must exist as a choice on Orders.SimulatedPayment. 'Failed' only appears on old rows. */
@@ -91,6 +110,8 @@ export type NotificationType =
   | 'OutOfStock'
   /** Not in the lists as created: add this choice to Notifications.NotificationType. */
   | 'NeedsReview'
+  /** An admin asked for more stock; the Restock Request flow emails every Supplier in Users. Add this choice too. */
+  | 'RestockRequest'
 
 export type EmailStatus = 'Pending' | 'Sent' | 'Failed'
 
@@ -104,6 +125,28 @@ export interface AppNotification {
   orderId: string
   isRead: boolean
   emailStatus?: EmailStatus
+  createdAt: string
+}
+
+/** A Users row with Role = Supplier. Suppliers get the restock emails. */
+export interface Supplier {
+  id: string
+  email: string
+  name: string
+}
+
+/** A Notifications row of type RestockRequest. */
+export interface RestockRequest {
+  id: string
+  clothingId: string
+  note: string
+  /** Pending until the flow has emailed the sales person. */
+  emailStatus: EmailStatus
+  /**
+   * True once the admin marked the delivery received or not coming. Stored in IsRead,
+   * which the Restock Request flow ignores (it only reads EmailStatus).
+   */
+  closed: boolean
   createdAt: string
 }
 
@@ -133,12 +176,5 @@ export interface ClothingInput {
   stock: number
   lowStockThreshold: number
   isActive: boolean
-}
-
-export interface SalesSummary {
-  confirmedRevenue: number
-  unitsSold: number
-  costOfGoodsSold: number
-  grossProfit: number
-  confirmedOrders: number
+  autoPrice: boolean
 }

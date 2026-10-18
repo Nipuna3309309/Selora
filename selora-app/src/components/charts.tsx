@@ -2,8 +2,8 @@ import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, ty
 import { Icon } from './Icon'
 
 /*
- * Small single-series charts for the dashboard. One hue (the primary) for every mark,
- * hairline solid grid, text in text colours, a hover/focus readout on every chart,
+ * Small charts for the dashboard. The primary hue for every mark, plus green for the one
+ * second line (profit against sales), hairline solid grid, text in text colours, a hover/focus readout on every chart,
  * and a table view on every card so no value depends on hovering.
  */
 
@@ -71,6 +71,7 @@ export function LineChart({
   formatTick,
   formatX,
   detail,
+  series,
 }: {
   points: { x: string; y: number }[]
   label: string
@@ -78,16 +79,20 @@ export function LineChart({
   formatTick: (n: number) => string
   formatX: (x: string) => string
   detail?: (i: number) => { label: string; value: string }[]
+  /** Names for a legend, and a second line drawn against the same axis (one value per point). */
+  series?: { main: string; second: string; values: number[] }
 }) {
   const [ref, width] = useWidth<HTMLDivElement>()
   const [active, setActive] = useState<number | null>(null)
   const n = points.length
-  const max = niceMax(Math.max(0, ...points.map((p) => p.y)))
+  const max = niceMax(Math.max(0, ...points.map((p) => p.y), ...(series?.values ?? [])))
   const plotW = Math.max(0, width - PAD.left - PAD.right)
   const x = (i: number) => PAD.left + (n <= 1 ? plotW / 2 : (i / (n - 1)) * plotW)
   const y = (v: number) => PAD.top + PLOT_H - (Math.max(0, v) / max) * PLOT_H
   const base = PAD.top + PLOT_H
-  const line = points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.y).toFixed(1)}`).join('')
+  const path = (ys: number[]) => ys.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('')
+  const line = path(points.map((p) => p.y))
+  const second = series ? path(series.values) : ''
   const area = n ? `${line}L${x(n - 1).toFixed(1)},${base}L${x(0).toFixed(1)},${base}Z` : ''
   const ticks = [0, 1, 2, 3, 4].map((k) => (max / 4) * k)
   const xTicks = n <= 1 ? [0] : [...new Set([0, 1, 2, 3, 4].map((k) => Math.round((k * (n - 1)) / 4)))]
@@ -120,6 +125,18 @@ export function LineChart({
       onBlur={() => setActive(null)}
       onKeyDown={onKey}
     >
+      {series && (
+        <ul className="chart-legend" aria-hidden="true">
+          <li>
+            <span className="key" />
+            {series.main}
+          </li>
+          <li>
+            <span className="key key-second" />
+            {series.second}
+          </li>
+        </ul>
+      )}
       {width > 0 && (
         <svg width={width} height={PLOT_H + PAD.top + PAD.bottom} aria-hidden="true">
           {ticks.map((t) => (
@@ -143,7 +160,11 @@ export function LineChart({
           ))}
           <path className="area" d={area} />
           <path className="line" d={line} pathLength={1} key={`${n}-${max}`} />
+          {series && <path className="line line-second" d={second} pathLength={1} key={`s-${n}-${max}`} />}
           {active !== null && <line className="crosshair" x1={x(active)} x2={x(active)} y1={PAD.top} y2={base} />}
+          {series && n > 0 && (
+            <circle className="dot dot-second" cx={x(active ?? last)} cy={y(series.values[active ?? last])} r={4} />
+          )}
           {n > 0 && (
             <circle className="dot" cx={x(active ?? last)} cy={y(points[active ?? last].y)} r={4.5} />
           )}

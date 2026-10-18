@@ -17,13 +17,18 @@ const PATHS = {
   monitor: 'M3 5h18v11H3V5Zm6 15h6m-3-4v4',
   dashboard: 'M4 4h7v9H4V4Zm9 0h7v5h-7V4Zm0 7h7v9h-7v-9ZM4 15h7v5H4v-5Z',
   tag: 'M3 12V4h8l9 9-8 8-9-9Zm5-4.5h.01',
-  coins: 'M12 4c4.4 0 8 1.3 8 3s-3.6 3-8 3-8-1.3-8-3 3.6-3 8-3Zm-8 3v5c0 1.7 3.6 3 8 3s8-1.3 8-3V7M4 12v5c0 1.7 3.6 3 8 3s8-1.3 8-3v-5',
+  percent: 'M19 5 5 19M7 9.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm10 10a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z',
+  coins:'M12 4c4.4 0 8 1.3 8 3s-3.6 3-8 3-8-1.3-8-3 3.6-3 8-3Zm-8 3v5c0 1.7 3.6 3 8 3s8-1.3 8-3V7M4 12v5c0 1.7 3.6 3 8 3s8-1.3 8-3v-5',
   list: 'M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01',
   chart: 'M4 20V10m6 10V4m6 16v-7m4 7H3',
   alert: 'M12 4 2.5 20h19L12 4Zm0 6v4.5m0 3h.01',
   info: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0-10v6m0-9h.01',
   arrow: 'M5 12h14m-5-5 5 5-5 5',
   table: 'M4 5h16v14H4V5Zm0 5h16M4 14.5h16M10 5v14',
+  send: 'M21 3 3 10.5l7.5 3L21 3Zm0 0-7.5 18-3-7.5',
+  play: 'M8 5.5v13l10.5-6.5L8 5.5Z',
+  pause: 'M8.5 5v14M15.5 5v14',
+  truck: 'M3 6h11v10H3V6Zm11 4h4l3 3v3h-7M7 19.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm10 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z',
 } as const
 
 export type IconName = keyof typeof PATHS

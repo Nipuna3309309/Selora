@@ -320,6 +320,18 @@
           },
           "default": true
         },
+        "AutoPrice": {
+          "title": "AutoPrice",
+          "type": "boolean",
+          "x-ms-permission": "read-write",
+          "x-ms-sort": "asc,desc",
+          "x-ms-capabilities": {
+            "filterFunctions": [
+              "eq"
+            ]
+          },
+          "default": true
+        },
         "OData__ColorTag": {
           "title": "Color Tag",
           "type": "string",
@@ -835,6 +847,7 @@
           "StockQuantity",
           "LowStockLevel",
           "IsActive",
+          "AutoPrice",
           "{Attachments}"
         ],
         "propertiesCompactDisplayOrder": [
@@ -847,7 +860,8 @@
           "SellingPrice",
           "StockQuantity",
           "LowStockLevel",
-          "IsActive"
+          "IsActive",
+          "AutoPrice"
         ],
         "propertiesTabularDisplayOrder": [
           "Title",
@@ -859,7 +873,8 @@
           "SellingPrice",
           "StockQuantity",
           "LowStockLevel",
-          "IsActive"
+          "IsActive",
+          "AutoPrice"
         ]
       }
     }

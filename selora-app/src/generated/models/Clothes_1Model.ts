@@ -47,6 +47,7 @@ export interface Clothes_1Base {
   StockQuantity?: number;
   LowStockLevel?: number;
   IsActive?: boolean;
+  AutoPrice?: boolean;
   OData__ColorTag?: string;
   ComplianceAssetId?: string;
   Modified?: string;
