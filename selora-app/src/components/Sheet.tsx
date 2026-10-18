@@ -14,7 +14,9 @@ export function Sheet({
   onClose,
   children,
   closeDisabled,
+  className = '',
 }: {
+  className?: string
   title: string
   onClose: () => void
   children: ReactNode
@@ -71,7 +73,7 @@ export function Sheet({
         if (e.target === e.currentTarget && !closeDisabled) onClose()
       }}
     >
-      <div className="sheet" role="dialog" aria-modal="true" aria-labelledby={titleId} ref={ref} tabIndex={-1}>
+      <div className={`sheet ${className}`.trim()} role="dialog" aria-modal="true" aria-labelledby={titleId} ref={ref} tabIndex={-1}>
         <header className="sheet-head">
           <h2 id={titleId}>{title}</h2>
           <button className="icon-btn" onClick={onClose} disabled={closeDisabled} aria-label="Close">
