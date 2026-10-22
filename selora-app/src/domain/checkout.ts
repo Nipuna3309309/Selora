@@ -1,8 +1,9 @@
 import type { Order } from './types'
 
 /**
- * A checkout with several items is stored as one Orders row per item. They share a checkout id in
- * RequestId: `CHK-<uuid>:1`, `CHK-<uuid>:2`. Older single-item orders have no colon and stand alone.
+ * A checkout is one Orders row (RequestId `CHK-<uuid>`) with an OrderDetails row per item, keyed
+ * `CHK-<uuid>:1`, `CHK-<uuid>:2`. Older checkouts used one Orders row per item with those keys in
+ * RequestId. Older single-item orders have no colon and stand alone.
  */
 export function checkoutIdOf(requestId: string): string {
   const i = requestId.lastIndexOf(':')

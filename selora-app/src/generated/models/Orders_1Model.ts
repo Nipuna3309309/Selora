@@ -63,6 +63,7 @@ export interface Orders_1Base {
   RequestId: string;
   OData__ColorTag?: string;
   ComplianceAssetId?: string;
+  CustomerEmail?: string;
   Modified?: string;
   Created?: string;
   "Author#Claims"?: string;

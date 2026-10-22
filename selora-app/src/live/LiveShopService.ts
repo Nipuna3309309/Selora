@@ -75,6 +75,7 @@ function toOrder(r: SpRow): Order {
   const c = COLS.orders
   return {
     id: str(r.ID),
+    parentId: str(r.ID),
     requestId: str(r[c.requestId]),
     clothingId: lookupId(r[c.clothing]),
     clothingName: lookupValue(r[c.clothing]),
@@ -92,15 +93,45 @@ function toOrder(r: SpRow): Order {
   }
 }
 
+/**
+ * One OrderDetails row as an Order, with the payment, customer and progress of its Orders row.
+ * The item's own status wins once the flow has set it.
+ */
+function toOrderLine(r: SpRow, parent: SpRow): Order {
+  const c = COLS.orderDetails
+  const o = COLS.orders
+  const line = choice(r[c.lineStatus])
+  return {
+    id: `D${str(r.ID)}`,
+    parentId: str(parent.ID),
+    requestId: str(r.Title),
+    clothingId: lookupId(r[c.clothing]),
+    clothingName: lookupValue(r[c.clothing]),
+    quantity: num(r[c.quantity]),
+    simulatedPayment: choice(parent[o.simulatedPayment]) as Order['simulatedPayment'],
+    unitPrice: num(r[c.unitPrice]),
+    total: num(r[c.lineTotal]),
+    stockBefore: optNum(r[c.stockBefore]),
+    stockAfter: optNum(r[c.stockAfter]),
+    status: (line === 'Confirmed' || line === 'Rejected' ? line : choice(parent[o.status]) || 'Pending') as Order['status'],
+    processingStage: (choice(parent[o.processingStage]) || 'New') as Order['processingStage'],
+    resultMessage: str(r[c.resultMessage]),
+    createdByEmail: str(parent.CreatedByEmail).toLowerCase(),
+    createdAt: str(parent.Created),
+  }
+}
+
 function toCost(r: SpRow): ClothingCost {
   const c = COLS.costs
+  const key = str(r[c.recordKey])
   return {
     id: str(r.ID),
-    recordKey: str(r[c.recordKey]),
+    recordKey: key,
     clothingId: lookupId(r[c.clothing]),
     costType: choice(r[c.recordType]) as ClothingCost['costType'],
     unitCost: num(r[c.unitCost]),
-    orderId: str(r[c.orderItemId]),
+    // SALE-D<id> rows belong to an OrderDetails item, whose order id is D<id>.
+    orderId: /^SALE-D\d+$/.test(key) ? key.slice(5) : str(r[c.orderItemId]),
     quantity: num(r[c.quantity]),
     title: str(r.Title),
     createdAt: str(r.Created),
@@ -260,7 +291,11 @@ export class LiveShopService implements ShopService {
 
   private startOrder(o: Order): Promise<void> {
     if (o.status !== 'Pending' || o.processingStage !== 'New') return Promise.resolve()
-    return this.start(`order-${o.id}`, () => this.gw.runProcessOrder(o.id))
+    return this.startOrderId(o.parentId)
+  }
+
+  private startOrderId(orderId: string): Promise<void> {
+    return this.start(`order-${orderId}`, () => this.gw.runProcessOrder(orderId))
   }
 
   async supplierView(): Promise<SupplierView> {
@@ -334,8 +369,10 @@ export class LiveShopService implements ShopService {
     const orders = this.user.role === 'Admin' ? await this.listAllOrders() : await this.listMyOrders()
     // Oldest first and only a few at a time: the flow handles one order at a time and queues a handful.
     const stuck = orders
-      .filter((o) => o.status === 'Pending' && o.processingStage === 'New' && due(`order-${o.id}`, o.createdAt, 20_000, 60_000))
+      .filter((o) => o.status === 'Pending' && o.processingStage === 'New' && due(`order-${o.parentId}`, o.createdAt, 20_000, 60_000))
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      // Items of one order share a single run.
+      .filter((o, i, all) => all.findIndex((x) => x.parentId === o.parentId) === i)
       .slice(0, 3)
     for (const o of stuck) await this.startOrder(o)
     if (this.user.role !== 'Admin') return
@@ -346,56 +383,56 @@ export class LiveShopService implements ShopService {
   }
 
   async placeOrder(input: NewOrderInput): Promise<Order> {
-    const order = await this.createOrder(input)
-    await this.startOrder(order)
+    const [order] = await this.placeCheckout({
+      checkoutId: input.requestId,
+      lines: [{ clothingId: input.clothingId, quantity: input.quantity }],
+      payment: input.simulatedPayment === 'Cash on delivery' ? 'Cash on delivery' : 'Success',
+    })
     return order
-  }
-
-  private async createOrder(input: NewOrderInput): Promise<Order> {
-    const c = COLS.orders
-    try {
-      const row = await this.gw.createItem(LISTS.orders, {
-        Title: input.requestId, // built-in Title is required by default
-        [c.requestId]: input.requestId,
-        [c.clothing]: lookup(input.clothingId),
-        [c.quantity]: input.quantity,
-        [c.simulatedPayment]: input.simulatedPayment,
-        // Only these four request fields are sent. Price, total, status and stage are the flow's job
-        // (Status/ProcessingStage rely on their SharePoint defaults: Pending / New).
-      })
-      return toOrder(row)
-    } catch (e) {
-      if (!(e instanceof UniqueViolationError)) throw e
-      const rows = await this.gw.getItems(LISTS.orders, {
-        filter: `${c.requestId} eq '${odata(input.requestId)}'`,
-        top: 1,
-      })
-      if (!rows[0]) throw e
-      return toOrder(rows[0])
-    }
   }
 
   async placeCheckout(input: CheckoutInput): Promise<Order[]> {
     if (input.lines.length === 0) throw new Error('The cart is empty.')
-    const placed: Order[] = []
-    // One at a time and in order: the flow handles orders one by one, so the lines are processed in cart order.
-    for (const [i, line] of input.lines.entries()) {
-      placed.push(
-        await this.placeOrder({
-          requestId: `${input.checkoutId}:${i + 1}`,
-          clothingId: line.clothingId,
-          quantity: line.quantity,
-          simulatedPayment: input.payment,
-        }),
-      )
+    // The Place Order flow saves the order, so customers need no write access to Orders or OrderDetails.
+    // Price, total, status and stage are Process Order's job.
+    const r = await this.gw.runPlaceOrder({
+      checkoutId: input.checkoutId,
+      payment: input.payment,
+      lines: input.lines.map((l, i) => ({ n: i + 1, clothingId: Number(l.clothingId), quantity: l.quantity })),
+    })
+    if (r.ok !== 'true' || !r.orderId) throw new Error(r.error || 'The order could not be saved. Please try again.')
+    // Started once every item is saved: one run handles the whole order and sends one email.
+    await this.startOrderId(r.orderId)
+    return (await this.listMyOrders()).filter((o) => o.parentId === r.orderId)
+  }
+
+  /** Orders rows as items: an OrderDetails row each for new orders, the row itself for older one-item orders. */
+  private withLines(headers: SpRow[], lines: SpRow[]): Order[] {
+    const byOrder = new Map<string, SpRow[]>()
+    for (const l of lines) {
+      const id = lookupId(l[COLS.orderDetails.order])
+      byOrder.set(id, [...(byOrder.get(id) ?? []), l])
     }
-    return placed
+    return headers.flatMap((h) => {
+      const items = byOrder.get(str(h.ID))
+      if (items) return items.map((l) => toOrderLine(l, h))
+      return lookupId(h[COLS.orders.clothing]) ? [toOrder(h)] : []
+    })
   }
 
   async listMyOrders(): Promise<Order[]> {
-    const rows = await this.gw.getItems(LISTS.orders, { orderBy: 'Created desc' })
-    // SharePoint already limits rows to the user's own; this is a second check.
-    return rows.map(toOrder).filter((o) => o.createdByEmail === this.user.email)
+    // Through the My Orders flow: customers can't read orders the Place Order flow saved for them.
+    const r = await this.gw.runMyOrders()
+    if (r.ok !== 'true') throw new Error("Couldn't load your orders.")
+    const rows = (s: string | undefined): SpRow[] => {
+      try {
+        const v = JSON.parse(s || '[]')
+        return Array.isArray(v) ? v : []
+      } catch {
+        return []
+      }
+    }
+    return this.withLines(rows(r.orders), rows(r.lines))
   }
 
   async listMyNotifications(): Promise<AppNotification[]> {
@@ -547,7 +584,11 @@ export class LiveShopService implements ShopService {
 
   async listAllOrders(): Promise<Order[]> {
     this.requireAdmin()
-    return (await this.gw.getItems(LISTS.orders, { orderBy: 'Created desc' })).map(toOrder)
+    const [orders, lines] = await Promise.all([
+      this.gw.getItems(LISTS.orders, { orderBy: 'Created desc' }),
+      this.gw.getItems(LISTS.orderDetails, { orderBy: 'ID asc' }),
+    ])
+    return this.withLines(orders, lines)
   }
 
   async requestRestock(clothingId: string, note: string): Promise<RestockRequest> {

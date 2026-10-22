@@ -98,23 +98,23 @@
           "properties": {
             "ok": {
               "title": "ok",
-              "type": "string",
-              "x-ms-dynamically-added": true
+              "x-ms-dynamically-added": true,
+              "type": "string"
             },
             "registered": {
               "title": "registered",
-              "type": "string",
-              "x-ms-dynamically-added": true
+              "x-ms-dynamically-added": true,
+              "type": "string"
             },
             "role": {
               "title": "role",
-              "type": "string",
-              "x-ms-dynamically-added": true
+              "x-ms-dynamically-added": true,
+              "type": "string"
             },
             "error": {
               "title": "error",
-              "type": "string",
-              "x-ms-dynamically-added": true
+              "x-ms-dynamically-added": true,
+              "type": "string"
             }
           }
         }

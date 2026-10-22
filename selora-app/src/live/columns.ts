@@ -13,6 +13,7 @@ export const LISTS = {
   clothes: 'Clothes',
   costs: 'ClothingCosts',
   orders: 'Orders',
+  orderDetails: 'OrderDetails',
   notifications: 'Notifications',
 } as const
 
@@ -52,6 +53,18 @@ export const COLS = {
     stockBefore: 'StockBefore',
     stockAfter: 'StockAfter',
     processingStage: 'ProcessingStage',
+    resultMessage: 'ResultMessage',
+  },
+  /** One row per item in an order. Title is the line key, `<checkoutId>:<n>`. */
+  orderDetails: {
+    order: 'ParentOrder',
+    clothing: 'Clothing',
+    quantity: 'Quantity',
+    unitPrice: 'UnitPrice',
+    lineTotal: 'LineTotal',
+    stockBefore: 'StockBefore',
+    stockAfter: 'StockAfter',
+    lineStatus: 'LineStatus',
     resultMessage: 'ResultMessage',
   },
   notifications: {

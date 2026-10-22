@@ -38,8 +38,15 @@ export interface SharePointGateway {
   uploadFile(library: string, name: string, base64: string): Promise<string>
   /** File content by site-relative path, in whatever form the host returns it. */
   readFile(path: string): Promise<unknown>
-  /** Starts the Process Order flow for one Orders row. Resolves once the run starts, not when it ends. */
+  /**
+   * Runs the Place Order flow, which saves a checkout as one Orders row and an OrderDetails row per item.
+   * Customers need no write access to those lists. Sending the same checkout again returns the same order.
+   */
+  runPlaceOrder(cart: PlaceOrderCart): Promise<SupplierFlowResult & { orderId?: string }>
+  /** Starts the Process Order flow for one Orders row and all its OrderDetails. Resolves once the run starts, not when it ends. */
   runProcessOrder(orderId: string): Promise<void>
+  /** Runs the My Orders flow: the caller's Orders rows and OrderDetails rows, as JSON text. */
+  runMyOrders(): Promise<SupplierFlowResult & { orders?: string; lines?: string }>
   /** Starts the Restock Request flow for one RestockRequest row in Notifications. */
   runRestockRequest(notificationId: string): Promise<void>
   /** Runs the Supplier Requests flow: open requests and the caller's offers, as JSON text. */
@@ -51,6 +58,13 @@ export interface SharePointGateway {
    * "signup" also adds them as a Customer when they are not.
    */
   runAccount(mode: 'check' | 'signup', name?: string): Promise<SupplierFlowResult & { registered?: string; role?: string }>
+}
+
+/** A checkout as the Place Order flow takes it. `n` numbers the items from 1, in cart order. */
+export interface PlaceOrderCart {
+  checkoutId: string
+  payment: string
+  lines: { n: number; clothingId: number; quantity: number }[]
 }
 
 /** What the supplier flows answer: ok is "true" or "false", with a reason when false. */
@@ -102,6 +116,7 @@ export function createGateway(): SharePointGateway {
     Clothes: gen.Clothes_1Service as unknown as ListService,
     ClothingCosts: gen.ClothingCosts_1Service as unknown as ListService,
     Orders: gen.Orders_1Service as unknown as ListService,
+    OrderDetails: gen.OrderDetailsService as unknown as ListService,
     Notifications: gen.Notifications_1Service as unknown as ListService,
   }
   const libraries = new Map<string, Promise<string>>()
@@ -167,8 +182,16 @@ export function createGateway(): SharePointGateway {
       return unwrap(await gen.SharePointService.GetFileContentByPath(SITE_URL, path, true, true), 'Loading the photo')
     },
 
+    async runPlaceOrder(cart) {
+      return unwrap(await gen.Selora_PlaceOrderService.Run({ text: JSON.stringify(cart) }), 'Placing the order') ?? {}
+    },
+
     async runProcessOrder(orderId) {
       unwrap(await gen.Selora_ProcessOrderService.Run({ number: Number(orderId) }), 'Starting order processing')
+    },
+
+    async runMyOrders() {
+      return unwrap(await gen.Selora_MyOrdersService.Run({}), 'Loading your orders') ?? {}
     },
 
     async runRestockRequest(notificationId) {

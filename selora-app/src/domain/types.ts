@@ -81,8 +81,14 @@ export type SimulatedPayment = 'Success' | 'Failed' | 'Cash on delivery'
 export type OrderStatus = 'Pending' | 'Processing' | 'Confirmed' | 'Rejected' | 'NeedsReview'
 export type ProcessingStage = 'New' | 'Prepared' | 'StockUpdated' | 'Completed'
 
+/**
+ * One item of an order. New orders are one Orders row with an OrderDetails row per item; their id is
+ * `D<OrderDetails ID>`. Older orders have one Orders row per item and use that row's ID.
+ */
 export interface Order {
   id: string
+  /** The Orders row the item belongs to, which the Process Order flow is started with. */
+  parentId: string
   /** Stable client-generated key; unique so retries cannot duplicate. */
   requestId: string
   clothingId: string

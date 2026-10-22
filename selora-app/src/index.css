@@ -489,8 +489,15 @@ td .chip { margin-left: 8px; }
 .sev svg { color: var(--sev); }
 .decision h4 { margin: 0 0 2px; font-size: 1rem; font-weight: 700; }
 .decision-text p { font-size: 0.9rem; }
-.decision-side { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px 14px; }
+.decision-side { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px 10px; max-width: 360px; }
 .impact { font-size: 0.85rem; font-weight: 700; white-space: nowrap; }
+/* Side column stacks: impact, then the restock status, then the buttons in one row, so a long
+   status line wraps here instead of squeezing the title column. */
+.decision-side .impact { flex-basis: 100%; text-align: right; }
+.decision-side .restock { display: contents; }
+.decision-side .restock-status { flex-basis: 100%; justify-content: flex-end; align-items: flex-start; text-align: right; line-height: 1.4; }
+.decision-side .restock-status svg { margin-top: 1px; }
+.decision-side .restock-error { text-align: right; }
 
 /* Auto SKU */
 .sku-auto { display: flex; align-items: center; min-height: 44px; padding: 0 14px; border: 1px dashed var(--line); border-radius: var(--r-m); background: var(--surface-2); font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: 0.04em; }
@@ -627,7 +634,9 @@ td .chip { margin-left: 8px; }
 @media (max-width: 899px) {
   .chart-grid { grid-template-columns: minmax(0, 1fr); }
   .decision { grid-template-columns: minmax(0, 1fr); gap: 10px; }
-  .decision-side { justify-content: space-between; flex-wrap: wrap; }
+  .decision-side { justify-content: flex-start; flex-wrap: wrap; max-width: none; }
+  .decision-side .impact, .decision-side .restock-error { text-align: left; }
+  .decision-side .restock-status { justify-content: flex-start; text-align: left; }
 }
 @media (max-width: 479px) {
   .kpis { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }

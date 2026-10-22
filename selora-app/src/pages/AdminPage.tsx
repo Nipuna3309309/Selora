@@ -53,7 +53,8 @@ export function AdminPage({ section }: { section: AdminSection }) {
   const working = (orders.data ?? []).filter(
     (o) => o.status === 'Processing' || (o.status === 'Pending' && now - new Date(o.createdAt).getTime() < 120_000),
   ).length
-  const review = (orders.data ?? []).filter((o) => o.status === 'NeedsReview')
+  // One entry per Orders row: every item of an interrupted order is marked NeedsReview.
+  const review = [...new Set((orders.data ?? []).filter((o) => o.status === 'NeedsReview').map((o) => o.parentId))]
 
   return (
     <section aria-labelledby="admin-title">
@@ -62,7 +63,7 @@ export function AdminPage({ section }: { section: AdminSection }) {
       </div>
       {review.length > 0 && (
         <p className="notice notice-warn" role="alert">
-          {review.length === 1 ? 'Order' : 'Orders'} {review.map((o) => o.id).join(', ')} {review.length === 1 ? 'needs' : 'need'} review.
+          {review.length === 1 ? 'Order' : 'Orders'} {review.join(', ')} {review.length === 1 ? 'needs' : 'need'} review.
           New orders are rejected until {review.length === 1 ? 'it is' : 'they are'} resolved. See docs/recovery.md.
         </p>
       )}

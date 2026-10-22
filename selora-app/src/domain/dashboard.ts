@@ -250,13 +250,13 @@ export function buildDashboard(
   const decisions: Decision[] = []
   const active = clothes.filter((c) => c.isActive)
 
-  const stuck = orders.filter((o) => o.status === 'NeedsReview')
+  const stuck = [...new Map(orders.filter((o) => o.status === 'NeedsReview').map((o) => [o.parentId, o])).values()]
   if (stuck.length > 0) {
     decisions.push({
       id: 'review',
       severity: 'critical',
       title: `Resolve ${stuck.length} stuck ${stuck.length === 1 ? 'order' : 'orders'}`,
-      detail: `Order ${list(stuck.map((o) => o.id))} stopped mid-processing. Every new order is rejected until this is cleared.`,
+      detail: `Order ${list(stuck.map((o) => o.parentId))} stopped mid-processing. Every new order is rejected until this is cleared.`,
       impact: Number.MAX_SAFE_INTEGER,
       impactLabel: 'All sales blocked',
       action: 'Open all orders',
